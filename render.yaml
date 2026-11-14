@@ -1,0 +1,26 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> выберите репозиторий
+services:
+  - type: web
+    name: neonlink
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL      # вставьте строку Neon в Dashboard (не в репозиторий!)
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RECAPTCHA_SECRET
+        sync: false
+      - key: RECAPTCHA_SITE_KEY
+        sync: false
+      - key: OWNER_USERNAME
+        value: CEBA
+      - key: OWNER_PASSWORD    # задаётся вручную в Dashboard
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://localhost,http://localhost,capacitor://localhost,https://tauri.localhost,http://tauri.localhost

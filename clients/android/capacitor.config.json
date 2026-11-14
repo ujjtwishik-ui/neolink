@@ -1,0 +1,7 @@
+{
+  "appId": "app.neonlink.mobile",
+  "appName": "NeonLink",
+  "webDir": "../../html",
+  "backgroundColor": "#0a0a0a",
+  "server": { "androidScheme": "https" }
+}

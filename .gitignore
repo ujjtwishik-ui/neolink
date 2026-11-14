@@ -1,0 +1,8 @@
+node_modules/
+.env
+clients/desktop/node_modules/
+clients/desktop/src-tauri/target/
+clients/android/node_modules/
+clients/android/android/
+*.apk
+*.msi
