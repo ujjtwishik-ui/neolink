@@ -3,7 +3,6 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], peer: null };
 
-  // Безопасный рендер SVG-галочки (чтобы не ломался интерфейс)
   const getCheckSVG = (color) => {
     if (!color) return null;
     const span = document.createElement('span');
@@ -32,13 +31,17 @@
   let $list, $msgs, $title, $composerTa, $app, $headActions, $chatHead;
 
   function showApp() {
-    // Удаляем старые шторки, чтобы они не дублировались при перезагрузке профиля
     document.querySelectorAll('.side-drawer, .side-overlay').forEach(e => e.remove());
 
     $list = el('div', { class: 'list' });
+    
+    // Галочка добавлена к твоему имени в шапке
     const me = el('div', { class: 'me', onclick: openProfile }, 
       avatar(S.me, true), 
-      el('div', { style: 'min-width:0; display:flex; flex-direction:column;' }, el('b', {}, S.me.displayName), el('small', {}, '@' + S.me.username))
+      el('div', { style: 'min-width:0; display:flex; flex-direction:column;' }, 
+        el('b', { style: 'display:flex; align-items:center; gap:4px' }, S.me.displayName, getCheckSVG(S.me.checkmark)), 
+        el('small', {}, '@' + S.me.username)
+      )
     );
     
     const side = el('aside', { class: 'sidebar' },
@@ -63,7 +66,6 @@
     
     const chat = el('main', { class: 'chat' }, $chatHead, storiesBar, $msgs, composer);
 
-    // Шторка меню (БЕЗ ЭМОДЗИ)
     const drawer = el('div', { class: 'side-drawer' },
       el('h2', { class: 'neon-text', style: 'margin-top:0' }, 'Меню'),
       el('div', { class: 'menu-item', onclick: () => { toggleMenu(); openProfile(); } }, 'Профиль'),
@@ -86,7 +88,6 @@
     document.querySelector('.side-overlay').classList.toggle('open');
   }
 
-  // --- ИСТОРИИ ---
   async function loadStories(container) {
     try {
       const { stories } = await api('GET', '/api/stories');
@@ -95,31 +96,24 @@
       }
       
       stories.forEach(st => {
-        // Мапим данные из БД (snake_case) в объект, который понимает функция avatar()
         const storyUser = { id: st.user_id, username: st.username, displayName: st.display_name, avatarUrl: st.avatar_url, checkmark: st.checkmark };
         let av = avatar(storyUser, false);
-        
-        // Если контент - картинка, ставим ее на фон
         if (st.content.startsWith('data:image')) {
            av.innerHTML = `<img src="${st.content}" />`;
         }
-        
         container.append(el('div', { class: 'story-item', onclick: () => openStory(st, storyUser) }, av, el('div', { class: 'story-name' }, storyUser.displayName)));
       });
     } catch(e) {}
   }
 
-  // Модальное окно истории
   function openStory(st, storyUser) {
     const isImage = st.content.startsWith('data:image');
-    const contentEl = isImage 
-      ? el('img', { src: st.content }) 
-      : el('div', { class: 'text-story' }, st.content);
+    const contentEl = isImage ? el('img', { src: st.content }) : el('div', { class: 'text-story' }, st.content);
 
     const modal = el('div', { class: 'story-modal' },
       el('div', { class: 'story-modal-head' },
         avatar(storyUser, false),
-        el('b', {}, storyUser.displayName, getCheckSVG(storyUser.checkmark)),
+        el('b', { style: 'display:flex; align-items:center; gap:4px' }, storyUser.displayName, getCheckSVG(storyUser.checkmark)),
         el('div', { style: 'flex:1' }),
         el('span', { class: 'close', onclick: () => modal.remove() }, '✕')
       ),
@@ -141,7 +135,6 @@
     const textInput = el('input', { type: 'text', placeholder: 'Текст истории' });
     const fileInput = el('input', { type: 'file', accept: 'image/*', style: 'margin-top:10px' });
     let base64 = null;
-    
     fileInput.onchange = async () => {
       const f = fileInput.files[0]; if (!f) return;
       try { base64 = await resizeImage(f, 400); textInput.value = 'Картинка'; } catch { toast('Ошибка'); }
@@ -157,7 +150,6 @@
     document.body.append(m);
   }
 
-  // --- КАНАЛЫ ---
   function createChannel() {
     const name = el('input', { type: 'text', placeholder: 'Название канала' });
     const desc = el('input', { type: 'text', placeholder: 'Описание' });
@@ -183,7 +175,6 @@
 
   async function loadConvs() { try { S.convs = (await api('GET', '/api/dm/conversations')).conversations; } catch {} renderSide(); }
 
-  // --- ПЕРЕКЛЮЧЕНИЕ ЧАТОВ ---
   function openGlobal(showChat) { 
     S.view = { type: 'global' }; 
     $title.textContent = '# Общая лента'; 
