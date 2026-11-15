@@ -38,8 +38,8 @@
   const render = () => { content.replaceChildren(el('div', { class: 'empty' }, 'Загрузка…')); ({ users, channels, feed, dm, audit })[tab]().catch((e) => toast(e.message)); };
   const table = (head, rows) => el('div', { class: 'tbl-wrap' }, el('table', {}, el('thead', {}, el('tr', {}, head.map((h) => el('th', {}, h)))), el('tbody', {}, rows)));
 
-  async function users(q = '') {
-    const { users } = await api('GET', '/api/admin/users?q=' + encodeURIComponent(q));
+  async function users() {
+    const { users } = await api('GET', '/api/admin/users');
     const rows = users.map((u) => el('tr', {},
       el('td', {}, u.id), el('td', {}, u.username), el('td', {}, u.display_name),
       el('td', {}, u.checkmark ? el('span', { class: 'check-' + u.checkmark }, '✔') : '—'),
@@ -51,13 +51,16 @@
   }
 
   async function editUser(u) {
-    const f = { username: el('input', { value: u.username }), displayName: el('input', { value: u.display_name }),
+    const f = { 
+      username: el('input', { value: u.username }), 
+      displayName: el('input', { value: u.display_name }),
       checkmark: el('select', {}, 
         el('option', { value: '', selected: !u.checkmark }, 'Нет'),
-        el('option', { value: 'green', selected: u.checkmark === 'green' }, 'Зеленая'),
-        el('option', { value: 'blue', selected: u.checkmark === 'blue' }, 'Синяя'),
-        el('option', { value: 'gold', selected: u.checkmark === 'gold' }, 'Золотая')
-      ) };
+        el('option', { value: 'green', selected: u.checkmark === 'green' }, 'Зеленая ✔'),
+        el('option', { value: 'blue', selected: u.checkmark === 'blue' }, 'Синяя ✔'),
+        el('option', { value: 'gold', selected: u.checkmark === 'gold' }, 'Золотая ✔')
+      ) 
+    };
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text', style: 'margin-top:0' }, 'Редактирование #' + u.id),
       el('div', { class: 'field' }, el('label', {}, 'Username'), f.username),
