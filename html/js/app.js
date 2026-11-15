@@ -3,16 +3,13 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], peer: null };
 
-  // Хелпер для красивой SVG-галочки (как на скрине)
+  // Безопасный рендер SVG-галочки (чтобы не ломался интерфейс)
   const getCheckSVG = (color) => {
     if (!color) return null;
-    const svg = `
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path fill="currentColor" d="M12 1.5l2.7 2.2 3.4-.8.8 3.4 3.1 1.6-1.1 3.3 2 2.9-2.5 2.4.2 3.5-3.4.8-1.4 3.2-3.3-.8-2.6 2.4-2.6-2.4-3.3.8-1.4-3.2-3.4-.8.2-3.5L1.5 12l2-2.9-1.1-3.3 3.1-1.6.8-3.4 3.4.8L12 1.5z"/>
-        <path fill="#0a0a0a" d="M10.4 15.6l-3.2-3.2 1.4-1.4 1.8 1.8 4.6-4.6 1.4 1.4-6 6z"/>
-      </svg>
-    `;
-    return el('span', { class: `badge-check check-${color}`, html: svg });
+    const span = document.createElement('span');
+    span.className = `badge-check check-${color}`;
+    span.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M12 1.5l2.7 2.2 3.4-.8.8 3.4 3.1 1.6-1.1 3.3 2 2.9-2.5 2.4.2 3.5-3.4.8-1.4 3.2-3.3-.8-2.6 2.4-2.6-2.4-3.3.8-1.4-3.2-3.4-.8.2-3.5L1.5 12l2-2.9-1.1-3.3 3.1-1.6.8-3.4 3.4.8L12 1.5z"/><path fill="#0a0a0a" d="M10.4 15.6l-3.2-3.2 1.4-1.4 1.8 1.8 4.6-4.6 1.4 1.4-6 6z"/></svg>`;
+    return span;
   };
 
   function showAuth() {
@@ -35,8 +32,15 @@
   let $list, $msgs, $title, $composerTa, $app, $headActions, $chatHead;
 
   function showApp() {
+    // Удаляем старые шторки, чтобы они не дублировались при перезагрузке профиля
+    document.querySelectorAll('.side-drawer, .side-overlay').forEach(e => e.remove());
+
     $list = el('div', { class: 'list' });
-    const me = el('div', { class: 'me', onclick: openProfile }, avatar(S.me, true), el('div', { style: 'min-width:0' }, el('b', {}, S.me.displayName), el('small', {}, '@' + S.me.username)));
+    const me = el('div', { class: 'me', onclick: openProfile }, 
+      avatar(S.me, true), 
+      el('div', { style: 'min-width:0; display:flex; flex-direction:column;' }, el('b', {}, S.me.displayName), el('small', {}, '@' + S.me.username))
+    );
+    
     const side = el('aside', { class: 'sidebar' },
       el('div', { class: 'side-head' }, me, el('span', { class: 'neon-text' }, 'NL')),
       el('div', { class: 'search' }, el('input', { type: 'search', placeholder: 'Поиск...' })), $list);
@@ -44,7 +48,6 @@
     $title = el('h2', { class: 'neon-text' }, '');
     $headActions = el('div', { class: 'row' });
     
-    // Кнопка Назад для мобилок и Гамбургер
     $chatHead = el('div', { class: 'chat-head' }, 
       el('span', { class: 'back-btn', onclick: () => $app.classList.remove('in-chat') }, '←'),
       el('span', { class: 'hamburger', onclick: () => toggleMenu() }, '☰'),
@@ -90,18 +93,24 @@
       if (S.me.checkmark === 'green' || S.me.username === 'CEBA') {
         container.append(el('div', { class: 'story-item', onclick: createStory }, el('div', { class: 'story-avatar add' }, '+'), el('div', { class: 'story-name' }, 'Добавить')));
       }
+      
       stories.forEach(st => {
-        let av = avatar(st, false);
+        // Мапим данные из БД (snake_case) в объект, который понимает функция avatar()
+        const storyUser = { id: st.user_id, username: st.username, displayName: st.display_name, avatarUrl: st.avatar_url, checkmark: st.checkmark };
+        let av = avatar(storyUser, false);
+        
+        // Если контент - картинка, ставим ее на фон
         if (st.content.startsWith('data:image')) {
            av.innerHTML = `<img src="${st.content}" />`;
         }
-        container.append(el('div', { class: 'story-item', onclick: () => openStory(st) }, av, el('div', { class: 'story-name' }, st.display_name)));
+        
+        container.append(el('div', { class: 'story-item', onclick: () => openStory(st, storyUser) }, av, el('div', { class: 'story-name' }, storyUser.displayName)));
       });
     } catch(e) {}
   }
 
   // Модальное окно истории
-  function openStory(st) {
+  function openStory(st, storyUser) {
     const isImage = st.content.startsWith('data:image');
     const contentEl = isImage 
       ? el('img', { src: st.content }) 
@@ -109,14 +118,13 @@
 
     const modal = el('div', { class: 'story-modal' },
       el('div', { class: 'story-modal-head' },
-        avatar(st, false),
-        el('b', {}, st.display_name, getCheckSVG(st.checkmark)),
+        avatar(storyUser, false),
+        el('b', {}, storyUser.displayName, getCheckSVG(storyUser.checkmark)),
         el('div', { style: 'flex:1' }),
         el('span', { class: 'close', onclick: () => modal.remove() }, '✕')
       ),
       el('div', { class: 'story-modal-content' }, contentEl),
       el('div', { class: 'story-modal-foot' },
-        // Если это моя история или я админ - даем кнопку удалить
         (st.user_id === S.me.id || S.me.username === 'CEBA') 
           ? el('button', { class: 'btn danger', onclick: async () => {
               if (confirm('Удалить историю?')) {
