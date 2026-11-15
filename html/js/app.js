@@ -1,9 +1,19 @@
 (function () {
   const { el, api, avatar, fmt, toast } = NL;
   const root = document.getElementById('root');
-  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], oldest: null, hasMore: true, peer: null, blocked: false };
+  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], peer: null };
 
-  const canEdit = (createdAt) => Date.now() - new Date(createdAt) < (S.cfg.editWindowMs || 900000);
+  // Хелпер для красивой SVG-галочки (как на скрине)
+  const getCheckSVG = (color) => {
+    if (!color) return null;
+    const svg = `
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path fill="currentColor" d="M12 1.5l2.7 2.2 3.4-.8.8 3.4 3.1 1.6-1.1 3.3 2 2.9-2.5 2.4.2 3.5-3.4.8-1.4 3.2-3.3-.8-2.6 2.4-2.6-2.4-3.3.8-1.4-3.2-3.4-.8.2-3.5L1.5 12l2-2.9-1.1-3.3 3.1-1.6.8-3.4 3.4.8L12 1.5z"/>
+        <path fill="#0a0a0a" d="M10.4 15.6l-3.2-3.2 1.4-1.4 1.8 1.8 4.6-4.6 1.4 1.4-6 6z"/>
+      </svg>
+    `;
+    return el('span', { class: `badge-check check-${color}`, html: svg });
+  };
 
   function showAuth() {
     let mode = 'login';
@@ -34,7 +44,9 @@
     $title = el('h2', { class: 'neon-text' }, '');
     $headActions = el('div', { class: 'row' });
     
+    // Кнопка Назад для мобилок и Гамбургер
     $chatHead = el('div', { class: 'chat-head' }, 
+      el('span', { class: 'back-btn', onclick: () => $app.classList.remove('in-chat') }, '←'),
       el('span', { class: 'hamburger', onclick: () => toggleMenu() }, '☰'),
       $title, $headActions
     );
@@ -48,15 +60,15 @@
     
     const chat = el('main', { class: 'chat' }, $chatHead, storiesBar, $msgs, composer);
 
-    // Шторка меню
+    // Шторка меню (БЕЗ ЭМОДЗИ)
     const drawer = el('div', { class: 'side-drawer' },
       el('h2', { class: 'neon-text', style: 'margin-top:0' }, 'Меню'),
-      el('div', { class: 'menu-item', onclick: () => { toggleMenu(); openProfile(); } }, '⚙️ Профиль'),
+      el('div', { class: 'menu-item', onclick: () => { toggleMenu(); openProfile(); } }, 'Профиль'),
       (S.me.checkmark === 'green' || S.me.username === 'CEBA') 
-        ? el('div', { class: 'menu-item', onclick: () => { toggleMenu(); createChannel(); } }, '📢 Создать канал') 
+        ? el('div', { class: 'menu-item', onclick: () => { toggleMenu(); createChannel(); } }, 'Создать канал') 
         : null,
-      S.isAdmin ? el('div', { class: 'menu-item', onclick: () => location.href='/admin' }, '🛡️ Админка') : null,
-      el('div', { class: 'menu-item', onclick: logout }, '🚪 Выйти')
+      S.isAdmin ? el('div', { class: 'menu-item', onclick: () => location.href='/admin' }, 'Админ-панель') : null,
+      el('div', { class: 'menu-item', onclick: logout }, 'Выйти')
     );
     const overlay = el('div', { class: 'side-overlay', onclick: toggleMenu });
     document.body.append(drawer, overlay);
@@ -79,26 +91,52 @@
         container.append(el('div', { class: 'story-item', onclick: createStory }, el('div', { class: 'story-avatar add' }, '+'), el('div', { class: 'story-name' }, 'Добавить')));
       }
       stories.forEach(st => {
-        const item = el('div', { class: 'story-item', onclick: () => alert('История: ' + st.content) },
-          avatar(st, false), el('div', { class: 'story-name' }, st.display_name));
+        let av = avatar(st, false);
         if (st.content.startsWith('data:image')) {
-           item.querySelector('.avatar').style.backgroundImage = `url(${st.content})`;
-           item.querySelector('.avatar').style.backgroundSize = 'cover';
-           item.querySelector('.avatar').textContent = '';
+           av.innerHTML = `<img src="${st.content}" />`;
         }
-        container.append(item);
+        container.append(el('div', { class: 'story-item', onclick: () => openStory(st) }, av, el('div', { class: 'story-name' }, st.display_name)));
       });
     } catch(e) {}
   }
 
+  // Модальное окно истории
+  function openStory(st) {
+    const isImage = st.content.startsWith('data:image');
+    const contentEl = isImage 
+      ? el('img', { src: st.content }) 
+      : el('div', { class: 'text-story' }, st.content);
+
+    const modal = el('div', { class: 'story-modal' },
+      el('div', { class: 'story-modal-head' },
+        avatar(st, false),
+        el('b', {}, st.display_name, getCheckSVG(st.checkmark)),
+        el('div', { style: 'flex:1' }),
+        el('span', { class: 'close', onclick: () => modal.remove() }, '✕')
+      ),
+      el('div', { class: 'story-modal-content' }, contentEl),
+      el('div', { class: 'story-modal-foot' },
+        // Если это моя история или я админ - даем кнопку удалить
+        (st.user_id === S.me.id || S.me.username === 'CEBA') 
+          ? el('button', { class: 'btn danger', onclick: async () => {
+              if (confirm('Удалить историю?')) {
+                try { await api('DELETE', '/api/stories/' + st.id); toast('Удалено'); modal.remove(); document.querySelector('.stories-bar').innerHTML=''; loadStories(document.querySelector('.stories-bar')); } catch(e) { toast(e.message); }
+              }
+            } }, 'Удалить историю')
+          : null
+      )
+    );
+    document.body.append(modal);
+  }
+
   async function createStory() {
-    const textInput = el('input', { type: 'text', placeholder: 'Текст истории (или URL картинки)' });
+    const textInput = el('input', { type: 'text', placeholder: 'Текст истории' });
     const fileInput = el('input', { type: 'file', accept: 'image/*', style: 'margin-top:10px' });
     let base64 = null;
     
     fileInput.onchange = async () => {
       const f = fileInput.files[0]; if (!f) return;
-      try { base64 = await resizeImage(f, 400); textInput.value = 'Картинка'; } catch { toast('Ошибка чтения'); }
+      try { base64 = await resizeImage(f, 400); textInput.value = 'Картинка'; } catch { toast('Ошибка'); }
     };
 
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
@@ -106,7 +144,7 @@
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
         const content = base64 || textInput.value.trim();
         if (!content) return;
-        try { await api('POST', '/api/stories', { content }); toast('Добавлено'); m.remove(); location.reload(); } catch(e) { toast(e.message); }
+        try { await api('POST', '/api/stories', { content }); toast('Добавлено'); m.remove(); document.querySelector('.stories-bar').innerHTML=''; loadStories(document.querySelector('.stories-bar')); } catch(e) { toast(e.message); }
       } }, 'Опубликовать')));
     document.body.append(m);
   }
@@ -114,7 +152,7 @@
   // --- КАНАЛЫ ---
   function createChannel() {
     const name = el('input', { type: 'text', placeholder: 'Название канала' });
-    const desc = el('input', { type: 'text', placeholder: 'Описание (необязательно)' });
+    const desc = el('input', { type: 'text', placeholder: 'Описание' });
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Создать канал'), name, desc,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
@@ -131,23 +169,26 @@
   function userItem(u, sub) {
     return el('div', { class: 'item' + (S.view.type === 'dm' && S.view.peerId === u.id ? ' active' : ''), onclick: () => openDm(u.id) },
       avatar(u), el('div', { class: 'meta' }, 
-        el('b', {}, u.displayName, u.checkmark ? el('span', { class: 'badge-check check-' + u.checkmark }, '✔') : null), 
+        el('b', {}, u.displayName, getCheckSVG(u.checkmark)), 
         el('span', {}, sub || '@' + u.username)));
   }
 
   async function loadConvs() { try { S.convs = (await api('GET', '/api/dm/conversations')).conversations; } catch {} renderSide(); }
 
+  // --- ПЕРЕКЛЮЧЕНИЕ ЧАТОВ ---
   function openGlobal(showChat) { 
     S.view = { type: 'global' }; 
     $title.textContent = '# Общая лента'; 
     $headActions.replaceChildren(); 
     S.msgs = []; renderSide(); loadHistory(); 
+    if (showChat) $app.classList.add('in-chat');
   }
   
   async function openDm(id) { 
     S.view = { type: 'dm', peerId: id }; 
     $title.textContent = 'Загрузка...'; 
     S.msgs = []; await loadHistory(); renderSide(); 
+    $app.classList.add('in-chat');
   }
 
   async function loadHistory() {
@@ -170,7 +211,7 @@
     const author = m.user || (mine ? S.me : S.peer);
     return el('div', { class: 'msg' + (mine ? ' mine' : '') }, mine ? null : avatar(author, true),
       el('div', { class: 'bubble' }, 
-        !mine ? el('div', { class: 'who' }, author.displayName, author.checkmark ? el('span', { class: 'badge-check check-' + author.checkmark }, '✔') : null) : null,
+        !mine ? el('div', { class: 'who' }, author.displayName, getCheckSVG(author.checkmark)) : null,
         el('div', { class: 'txt' }, m.text), el('div', { class: 'foot' }, fmt(m.createdAt))));
   }
 

@@ -245,6 +245,16 @@ app.post('/api/stories', auth, wrap(async (req, res) => {
   res.json({ story: r.rows[0] });
 }));
 
+app.delete('/api/stories/:id', auth, wrap(async (req, res) => {
+  const st = (await q('SELECT * FROM stories WHERE id=$1', [req.params.id])).rows[0];
+  if (!st) return res.status(404).json({ error: 'Not found' });
+  if (st.user_id !== req.user.id && req.user.username !== 'CEBA') {
+    return res.status(403).json({ error: 'Нет прав на удаление' });
+  }
+  await q('DELETE FROM stories WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
 // --- ADMIN ---
 const admin = express.Router();
 app.use('/api/admin', auth, adminOnly, admin);
