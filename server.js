@@ -153,6 +153,7 @@ app.get('/api/users', auth, wrap(async (req, res) => {
   res.json({ users: r.rows.map(publicUser) });
 }));
 
+// --- СООБЩЕНИЯ В ОБЩЕЙ ЛЕНТЕ ---
 const msgSelect = `SELECT m.id,m.text,m.created_at,m.edited_at,m.edited_by_admin, u.id AS uid,u.username,u.display_name,u.avatar_url,u.role,u.checkmark FROM messages m JOIN users u ON u.id=m.user_id`;
 const msgOut = (r) => ({ id: r.id, text: r.text, createdAt: r.created_at, editedAt: r.edited_at, editedByAdmin: r.edited_by_admin, user: { id: r.uid, username: r.username, displayName: r.display_name, avatarUrl: r.avatar_url, role: r.role, checkmark: r.checkmark } });
 
@@ -189,6 +190,7 @@ app.delete('/api/messages/:id', auth, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// --- ЛИЧНЫЕ СООБЩЕНИЯ (DM) ---
 const dmOut = (r) => ({ id: r.id, senderId: r.sender_id, recipientId: r.recipient_id, text: r.text, createdAt: r.created_at, editedAt: r.edited_at, editedByAdmin: r.edited_by_admin });
 const emitDm = (ev, row, payload) => { io.to(`user:${row.sender_id}`).to(`user:${row.recipient_id}`).emit(ev, payload); };
 
@@ -217,7 +219,7 @@ app.post('/api/dm/:userId', auth, writeGuard, sendLimiter, wrap(async (req, res)
   res.json({ message: dmOut(r.rows[0]) });
 }));
 
-// --- КАНАЛЫ (Требуется зеленая галка) ---
+// --- КАНАЛЫ ---
 app.get('/api/channels', auth, wrap(async (req, res) => {
   const r = await q('SELECT * FROM channels ORDER BY id DESC');
   res.json({ channels: r.rows });
@@ -233,7 +235,48 @@ app.post('/api/channels', auth, wrap(async (req, res) => {
   res.json({ channel: r.rows[0] });
 }));
 
-// --- ИСТОРИИ (Требуется зеленая галка) ---
+// --- СООБЩЕНИЯ В КАНАЛАХ ---
+app.get('/api/channels/:id/messages', auth, wrap(async (req, res) => {
+  const chId = parseInt(req.params.id);
+  const r = await q(`
+    SELECT m.id, m.text, m.created_at, m.edited_at, m.edited_by_admin, 
+           u.id AS uid, u.username, u.display_name, u.avatar_url, u.role, u.checkmark 
+    FROM channel_messages m 
+    JOIN users u ON u.id = m.user_id 
+    WHERE m.channel_id = $1 
+    ORDER BY m.id ASC LIMIT 100
+  `, [chId]);
+  
+  const messages = r.rows.map(row => ({
+    id: row.id, text: row.text, createdAt: row.created_at, editedAt: row.edited_at, editedByAdmin: row.edited_by_admin,
+    user: { id: row.uid, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark }
+  }));
+  res.json({ messages });
+}));
+
+app.post('/api/channels/:id/messages', auth, writeGuard, wrap(async (req, res) => {
+  const chId = parseInt(req.params.id);
+  const text = cleanText(req.body?.text);
+  if (!text) return res.status(400).json({ error: 'Empty message' });
+  
+  const ins = await q('INSERT INTO channel_messages (channel_id, user_id, text) VALUES ($1, $2, $3) RETURNING id', [chId, req.user.id, text]);
+  
+  const r = await q(`
+    SELECT m.id, m.text, m.created_at, u.id AS uid, u.username, u.display_name, u.avatar_url, u.role, u.checkmark 
+    FROM channel_messages m JOIN users u ON u.id = m.user_id WHERE m.id = $1
+  `, [ins.rows[0].id]);
+  
+  const row = r.rows[0];
+  const out = {
+    id: row.id, text: row.text, createdAt: row.created_at,
+    user: { id: row.uid, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark }
+  };
+  
+  io.to(`channel:${chId}`).emit('channel:new', { channelId: chId, message: out });
+  res.json({ message: out });
+}));
+
+// --- ИСТОРИИ ---
 app.get('/api/stories', auth, wrap(async (req, res) => {
   const r = await q(`SELECT s.*, u.username, u.display_name, u.avatar_url, u.checkmark FROM stories s JOIN users u ON u.id = s.user_id WHERE s.created_at > NOW() - INTERVAL '24 hours' ORDER BY s.id DESC`);
   res.json({ stories: r.rows });
@@ -248,9 +291,7 @@ app.post('/api/stories', auth, wrap(async (req, res) => {
 app.delete('/api/stories/:id', auth, wrap(async (req, res) => {
   const st = (await q('SELECT * FROM stories WHERE id=$1', [req.params.id])).rows[0];
   if (!st) return res.status(404).json({ error: 'Not found' });
-  if (st.user_id !== req.user.id && req.user.username !== 'CEBA') {
-    return res.status(403).json({ error: 'Нет прав на удаление' });
-  }
+  if (st.user_id !== req.user.id && req.user.username !== 'CEBA') return res.status(403).json({ error: 'Нет прав' });
   await q('DELETE FROM stories WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 }));
@@ -344,7 +385,7 @@ admin.post('/maintenance', wrap(async (req, res) => {
   res.json({ maintenance: on });
 }));
 
-// --- SOCKET.IO ---
+// --- SOCKET.IO (Добавлены комнаты для каналов) ---
 io.use(async (socket, next) => {
   try {
     const p = jwt.verify(socket.handshake.auth?.token || '', JWT_SECRET);
@@ -353,7 +394,16 @@ io.use(async (socket, next) => {
     socket.data.user = u; next();
   } catch { next(new Error('unauthorized')); }
 });
-io.on('connection', (socket) => { socket.join('global'); socket.join(`user:${socket.data.user.id}`); });
+
+io.on('connection', (socket) => {
+  socket.join('global');
+  socket.join(`user:${socket.data.user.id}`);
+
+  // Подписка на сообщения конкретного канала
+  socket.on('join:channel', (channelId) => {
+    socket.join(`channel:${channelId}`);
+  });
+});
 
 const htmlDir = path.join(__dirname, 'html');
 app.get('/admin', (_, res) => res.sendFile(path.join(htmlDir, 'admin.html')));

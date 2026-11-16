@@ -81,7 +81,7 @@
     root.replaceChildren($app);
     
     connectSocket(); 
-    loadChannels(); // <--- Загружаем каналы
+    loadChannels(); 
     loadConvs(); 
     openGlobal(false);
   }
@@ -91,7 +91,6 @@
     document.querySelector('.side-overlay').classList.toggle('open');
   }
 
-  // --- ЗАГРУЗКА КАНАЛОВ ---
   async function loadChannels() {
     try { S.channels = (await api('GET', '/api/channels')).channels; } catch(e) { console.error(e); }
     renderSide();
@@ -159,7 +158,6 @@
     document.body.append(m);
   }
 
-  // --- СОЗДАНИЕ КАНАЛА ---
   function createChannel() {
     const name = el('input', { type: 'text', placeholder: 'Название канала' });
     const desc = el('input', { type: 'text', placeholder: 'Описание' });
@@ -171,7 +169,7 @@
           await api('POST', '/api/channels', { name: name.value, description: desc.value }); 
           toast('Канал создан'); 
           m.remove(); 
-          loadChannels(); // <--- Обновляем список каналов в меню
+          loadChannels(); 
         } catch(e) { toast(e.message); }
       } }, 'Создать')));
     document.body.append(m);
@@ -180,9 +178,9 @@
   function renderSide() {
     const g = el('div', { class: 'item' + (S.view.type === 'global' ? ' active' : ''), onclick: () => openGlobal(true) }, el('div', { class: 'avatar' }, '#'), el('div', { class: 'meta' }, el('b', {}, 'Общая лента')));
     
-    // Рендерим каналы
+    // Каналы теперь кликабельны!
     const channelItems = S.channels.map(c => 
-      el('div', { class: 'item', onclick: () => toast('Вход в канал ' + c.name + ' пока в разработке') }, 
+      el('div', { class: 'item' + (S.view.type === 'channel' && S.view.channelId === c.id ? ' active' : ''), onclick: () => openChannel(c) }, 
         el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; font-weight:bold;' }, '📢'), 
         el('div', { class: 'meta' }, 
           el('b', {}, c.name, getCheckSVG(c.checkmark)),
@@ -218,8 +216,25 @@
     $app.classList.add('in-chat');
   }
 
+  // НОВАЯ ФУНКЦИЯ ОТКРЫТИЯ КАНАЛА
+  async function openChannel(c) {
+    S.view = { type: 'channel', channelId: c.id };
+    $title.textContent = '📢 ' + c.name;
+    $headActions.replaceChildren();
+    S.msgs = []; 
+    await loadHistory(); 
+    renderSide();
+    $app.classList.add('in-chat');
+    
+    // Подключаемся к комнате канала в Socket.io
+    if (S.socket) S.socket.emit('join:channel', c.id);
+  }
+
   async function loadHistory() {
-    const url = S.view.type === 'global' ? '/api/messages' : '/api/dm/' + S.view.peerId;
+    let url = '/api/messages';
+    if (S.view.type === 'dm') url = '/api/dm/' + S.view.peerId;
+    if (S.view.type === 'channel') url = '/api/channels/' + S.view.channelId + '/messages';
+    
     const d = await api('GET', url);
     if (S.view.type === 'dm') {
       S.peer = d.peer;
@@ -246,7 +261,8 @@
     const text = $composerTa.value.trim(); if (!text) return;
     try {
       if (S.view.type === 'global') await api('POST', '/api/messages', { text });
-      else await api('POST', '/api/dm/' + S.view.peerId, { text });
+      else if (S.view.type === 'dm') await api('POST', '/api/dm/' + S.view.peerId, { text });
+      else if (S.view.type === 'channel') await api('POST', '/api/channels/' + S.view.channelId + '/messages', { text });
       $composerTa.value = '';
     } catch(e) { toast(e.message); }
   }
@@ -257,6 +273,13 @@
     const s = (S.socket = io(NL.API || undefined, { auth: { token: NL.token() } }));
     s.on('message:new', (m) => { if (S.view.type === 'global') { S.msgs.push(m); renderMsgs(); } });
     s.on('dm:new', (m) => { if (S.view.type === 'dm' && (m.senderId === S.view.peerId || m.recipientId === S.view.peerId)) { S.msgs.push(m); renderMsgs(); } else loadConvs(); });
+    
+    // Получаем новые сообщения в каналах
+    s.on('channel:new', (data) => { 
+      if (S.view.type === 'channel' && S.view.channelId === data.channelId) { 
+        S.msgs.push(data.message); renderMsgs(); 
+      } 
+    });
   }
 
   function openProfile() {
