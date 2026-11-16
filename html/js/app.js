@@ -1,9 +1,9 @@
 (function () {
   const { el, api, avatar, fmt, toast } = NL;
   const root = document.getElementById('root');
-  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null };
+  // Добавил searchQuery в состояние
+  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null, searchQuery: '' };
 
-  // --- ГЕНЕРАТОР SVG ИКОНОК ---
   const getSVG = (name, size = 20) => {
     const icons = {
       menu: `<path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>`,
@@ -31,11 +31,9 @@
     return s;
   };
 
-  // --- АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ ---
   function showAuth() {
     let mode = 'login';
     const err = el('div', { class: 'err' });
-    
     const u = el('input', { type: 'text', placeholder: 'Username (латиница)' });
     const dn = el('input', { type: 'text', placeholder: 'Отображаемое имя (Ник)' });
     const p = el('input', { type: 'password', placeholder: 'Пароль' });
@@ -66,16 +64,11 @@
         const r = await api('POST', '/api/auth/' + mode, body);
         NL.setToken(r.token); 
         await start();
-      } catch (ex) { 
-        err.textContent = ex.message; 
-      } finally { 
-        submit.disabled = false; 
-      }
+      } catch (ex) { err.textContent = ex.message; } finally { submit.disabled = false; }
     } }, 
       el('div', { class: 'tabs', style: 'display:flex; gap: 8px;' }, tLogin, tReg),
       el('div', { class: 'field' }, el('label', {}, 'Username'), u), 
-      dnField, 
-      el('div', { class: 'field' }, el('label', {}, 'Пароль'), p), 
+      dnField, el('div', { class: 'field' }, el('label', {}, 'Пароль'), p), 
       err, submit
     );
 
@@ -92,9 +85,19 @@
     
     const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, getSVG('plus', 28));
     
+    // ДОБАВЛЕНА ЛОГИКА ПОИСКА
+    const searchInput = el('input', { 
+      type: 'search', 
+      placeholder: 'Поиск...', 
+      oninput: (e) => { 
+        S.searchQuery = e.target.value.toLowerCase().trim(); 
+        renderSide(); 
+      } 
+    });
+
     const side = el('aside', { class: 'sidebar' },
       el('div', { class: 'side-head' }, me, el('span', { class: 'neon-text' }, 'NL')),
-      el('div', { class: 'search' }, el('input', { type: 'search', placeholder: 'Поиск...' })), $list, fabBtn);
+      el('div', { class: 'search' }, searchInput), $list, fabBtn);
 
     $title = el('h2', { class: 'neon-text' }, '');
     $headActions = el('div', { class: 'row', style: 'gap: 8px;' });
@@ -123,9 +126,13 @@
   function toggleMenu() { document.querySelector('.side-drawer').classList.toggle('open'); document.querySelector('.side-overlay').classList.toggle('open'); }
 
   function openAddMenu() {
+    // ПРОВЕРКА НА ГАЛОЧКУ
+    const canCreateChannel = S.me.checkmark === 'green' || S.me.username === 'CEBA';
+
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Действия'),
-      el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал'),
+      // Если есть права - показываем кнопку, иначе null
+      canCreateChannel ? el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал') : null,
       el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); joinChannel(); } }, 'Войти по коду канала'),
       el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); findUser(); } }, 'Найти человека (Начать чат)'),
       el('button', { class: 'btn ghost', style: 'width:100%', onclick: () => m.remove() }, 'Отмена')
@@ -172,15 +179,35 @@
     renderSide(); 
   }
 
+  // ОБНОВЛЕННЫЙ РЕНДЕР С УЧЕТОМ ПОИСКА
   function renderSide() {
-    const g = el('div', { class: 'item' + (S.view.type === 'global' ? ' active' : ''), onclick: () => openGlobal(true) }, el('div', { class: 'avatar' }, '#'), el('div', { class: 'meta' }, el('b', {}, 'Общая лента')));
+    const q = S.searchQuery;
     
-    const channelItems = S.channels.map(c => {
+    // Фильтруем каналы
+    const filteredChannels = S.channels.filter(c => 
+      !q || c.name.toLowerCase().includes(q) || (c.description && c.description.toLowerCase().includes(q))
+    );
+
+    // Фильтруем личные чаты
+    const filteredConvs = S.convs.filter(c => 
+      !q || c.user.displayName.toLowerCase().includes(q) || c.user.username.toLowerCase().includes(q)
+    );
+
+    const g = el('div', { class: 'item' + (S.view.type === 'global' && !q ? ' active' : ''), onclick: () => { S.searchQuery = ''; document.querySelector('.search input').value = ''; openGlobal(true); } }, el('div', { class: 'avatar' }, '#'), el('div', { class: 'meta' }, el('b', {}, 'Общая лента')));
+    
+    const channelItems = filteredChannels.map(c => {
       const av = c.avatar_url ? el('img', { src: c.avatar_url, style: 'width:100%; height:100%; border-radius:50%' }) : el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; display:flex; align-items:center; justify-content:center;' }, getSVG('channel', 24));
       return el('div', { class: 'item' + (S.view.type === 'channel' && S.view.channelId === c.id ? ' active' : ''), onclick: () => openChannel(c) }, 
         av, el('div', { class: 'meta' }, el('b', {}, c.name, getCheckSVG(c.checkmark)), el('span', {}, c.description || 'Канал')));
     });
-    $list.replaceChildren(g, ...channelItems, ...S.convs.map((c) => userItem(c.user, c.lastText)));
+
+    // Если ничего не найдено - показываем заглушку (по желанию)
+    if (q && channelItems.length === 0 && filteredConvs.length === 0) {
+       $list.replaceChildren(g, el('div', { style: 'padding: 20px; color: #888; text-align: center;' }, 'Ничего не найдено'));
+       return;
+    }
+
+    $list.replaceChildren(g, ...channelItems, ...filteredConvs.map((c) => userItem(c.user, c.lastText)));
   }
 
   function userItem(u, sub) {
