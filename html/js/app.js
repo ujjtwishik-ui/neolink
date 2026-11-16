@@ -3,8 +3,10 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null };
 
+  // --- ИСПРАВЛЕННЫЙ ГЕНЕРАТОР SVG (Возвращает DOM-элемент) ---
   const getSVG = (name, size = 20) => {
     const icons = {
+      menu: `<path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>`,
       channel: `<path fill="currentColor" d="M12 11.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm4.5 4.5l-2.5-2.5 2.5-2.5V16zM12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z"/>`,
       settings: `<path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>`,
       trash: `<path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>`,
@@ -14,7 +16,12 @@
       send: `<path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>`,
       close: `<path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`
     };
-    return `<svg viewBox="0 0 24 24" style="width:${size}px; height:${size}px; display:inline-block; vertical-align:middle; fill:currentColor;">${icons[name] || ''}</svg>`;
+    const span = document.createElement('span');
+    span.style.display = 'inline-flex';
+    span.style.alignItems = 'center';
+    span.style.justifyContent = 'center';
+    span.innerHTML = `<svg viewBox="0 0 24 24" style="width:${size}px; height:${size}px; fill:currentColor;">${icons[name] || ''}</svg>`;
+    return span;
   };
 
   const getCheckSVG = (color) => {
@@ -45,7 +52,8 @@
     $list = el('div', { class: 'list' });
     const me = el('div', { class: 'me', onclick: openProfile }, avatar(S.me, true), el('div', {}, el('b', { style: 'display:flex; align-items:center; gap:4px' }, S.me.displayName, getCheckSVG(S.me.checkmark)), el('small', {}, '@' + S.me.username)));
     
-    const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, el('div', { html: getSVG('plus', 28) }));
+    // Кнопка +
+    const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, getSVG('plus', 28));
     
     const side = el('aside', { class: 'sidebar' },
       el('div', { class: 'side-head' }, me, el('span', { class: 'neon-text' }, 'NL')),
@@ -55,13 +63,13 @@
     $headActions = el('div', { class: 'row', style: 'gap: 8px;' });
     $chatHead = el('div', { class: 'chat-head' }, 
       el('span', { class: 'back-btn', onclick: () => $app.classList.remove('in-chat') }, '←'),
-      el('span', { class: 'hamburger', onclick: () => toggleMenu() }, el('div', { html: `<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:var(--lime1);"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>` })),
+      el('span', { class: 'hamburger', onclick: () => toggleMenu() }, getSVG('menu', 24)),
       $title, $headActions);
 
     const storiesBar = el('div', { class: 'stories-bar' }); loadStories(storiesBar);
     $msgs = el('div', { class: 'messages' });
     $composerTa = el('textarea', { placeholder: 'Сообщение...', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } } });
-    const chat = el('main', { class: 'chat' }, $chatHead, storiesBar, $msgs, el('div', { class: 'composer' }, $composerTa, el('button', { class: 'btn', onclick: send }, el('div', { html: getSVG('send', 20) }))));
+    const chat = el('main', { class: 'chat' }, $chatHead, storiesBar, $msgs, el('div', { class: 'composer' }, $composerTa, el('button', { class: 'btn', onclick: send }, getSVG('send', 20))));
 
     const drawer = el('div', { class: 'side-drawer' },
       el('h2', { class: 'neon-text', style: 'margin-top:0' }, 'Меню'),
@@ -132,7 +140,7 @@
     const g = el('div', { class: 'item' + (S.view.type === 'global' ? ' active' : ''), onclick: () => openGlobal(true) }, el('div', { class: 'avatar' }, '#'), el('div', { class: 'meta' }, el('b', {}, 'Общая лента')));
     
     const channelItems = S.channels.map(c => {
-      const av = c.avatar_url ? el('img', { src: c.avatar_url, style: 'width:100%; height:100%; border-radius:50%' }) : el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; display:flex; align-items:center; justify-content:center;' }, el('div', { html: getSVG('channel', 24) }));
+      const av = c.avatar_url ? el('img', { src: c.avatar_url, style: 'width:100%; height:100%; border-radius:50%' }) : el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; display:flex; align-items:center; justify-content:center;' }, getSVG('channel', 24));
       return el('div', { class: 'item' + (S.view.type === 'channel' && S.view.channelId === c.id ? ' active' : ''), onclick: () => openChannel(c) }, 
         av, el('div', { class: 'meta' }, el('b', {}, c.name, getCheckSVG(c.checkmark)), el('span', {}, c.description || 'Канал')));
     });
@@ -154,16 +162,14 @@
   async function openChannel(c) {
     S.view = { type: 'channel', channelId: c.id }; $title.textContent = c.name; S.currentChannel = c;
     
-    // Если я создатель или CEBA - показываем шестеренку, код и удаление.
     if (c.owner_id === S.me.id || S.me.username === 'CEBA') {
       $headActions.replaceChildren(
-        el('button', { class: 'btn ghost small', onclick: () => editMyChannel(c), title: 'Настройки' }, el('div', { html: getSVG('settings', 18) })),
-        el('button', { class: 'btn ghost small', onclick: () => alert('Код приглашения: ' + c.invite_code), title: 'Код' }, el('div', { html: getSVG('link', 18) })),
-        el('button', { class: 'btn danger small', onclick: () => deleteMyChannel(c.id), title: 'Удалить' }, el('div', { html: getSVG('trash', 18) }))
+        el('button', { class: 'btn ghost small', onclick: () => editMyChannel(c), title: 'Настройки' }, getSVG('settings', 18)),
+        el('button', { class: 'btn ghost small', onclick: () => alert('Код приглашения: ' + c.invite_code), title: 'Код' }, getSVG('link', 18)),
+        el('button', { class: 'btn danger small', onclick: () => deleteMyChannel(c.id), title: 'Удалить' }, getSVG('trash', 18))
       );
     } else {
-      // Для обычных юзеров - кнопка выхода
-      $headActions.replaceChildren(el('button', { class: 'btn danger small', onclick: () => leaveChannel(c.id), title: 'Выйти' }, el('div', { html: getSVG('exit', 18) })));
+      $headActions.replaceChildren(el('button', { class: 'btn danger small', onclick: () => leaveChannel(c.id), title: 'Выйти' }, getSVG('exit', 18)));
     }
 
     S.msgs = []; await loadHistory(); renderSide(); $app.classList.add('in-chat');
@@ -193,7 +199,7 @@
     try { 
       await api('DELETE', '/api/channels/' + id); 
       toast('Канал удален'); 
-      await loadChannels(); // Дожидаемся обновления
+      await loadChannels();
       openGlobal(true); 
     } catch(e) { toast(e.message); }
   }
@@ -203,7 +209,7 @@
     try { 
       await api('DELETE', '/api/channels/' + id + '/leave'); 
       toast('Вы вышли'); 
-      await loadChannels(); // Дожидаемся обновления
+      await loadChannels();
       openGlobal(true); 
     } catch(e) { toast(e.message); }
   }
@@ -245,7 +251,7 @@
   async function loadStories(container) {
     try {
       const { stories } = await api('GET', '/api/stories');
-      if (S.me.checkmark === 'green' || S.me.username === 'CEBA') container.append(el('div', { class: 'story-item', onclick: createStory }, el('div', { class: 'story-avatar add' }, el('div', { html: getSVG('plus', 24) })), el('div', { class: 'story-name' }, 'Добавить')));
+      if (S.me.checkmark === 'green' || S.me.username === 'CEBA') container.append(el('div', { class: 'story-item', onclick: createStory }, el('div', { class: 'story-avatar add' }, getSVG('plus', 24)), el('div', { class: 'story-name' }, 'Добавить')));
       stories.forEach(st => {
         const storyUser = { id: st.user_id, username: st.username, displayName: st.display_name, avatarUrl: st.avatar_url, checkmark: st.checkmark };
         let av = avatar(storyUser, false); if (st.content.startsWith('data:image')) av.innerHTML = `<img src="${st.content}" />`;
@@ -255,9 +261,9 @@
   }
   
   function openStory(st, storyUser) {
-    const modal = el('div', { class: 'story-modal' }, el('div', { class: 'story-modal-head' }, avatar(storyUser, false), el('b', {}, storyUser.displayName, getCheckSVG(storyUser.checkmark)), el('div', { style: 'flex:1' }), el('span', { class: 'close', onclick: () => modal.remove(), style: 'display:flex' }, el('div', { html: getSVG('close', 24) }))),
+    const modal = el('div', { class: 'story-modal' }, el('div', { class: 'story-modal-head' }, avatar(storyUser, false), el('b', {}, storyUser.displayName, getCheckSVG(storyUser.checkmark)), el('div', { style: 'flex:1' }), el('span', { class: 'close', onclick: () => modal.remove(), style: 'display:flex' }, getSVG('close', 24))),
       el('div', { class: 'story-modal-content' }, st.content.startsWith('data:image') ? el('img', { src: st.content }) : el('div', { class: 'text-story' }, st.content)),
-      el('div', { class: 'story-modal-foot' }, (st.user_id === S.me.id || S.me.username === 'CEBA') ? el('button', { class: 'btn danger', onclick: async () => { await api('DELETE', '/api/stories/' + st.id); modal.remove(); document.querySelector('.stories-bar').innerHTML=''; loadStories(document.querySelector('.stories-bar')); } }, el('div', { html: getSVG('trash', 18) })) : null));
+      el('div', { class: 'story-modal-foot' }, (st.user_id === S.me.id || S.me.username === 'CEBA') ? el('button', { class: 'btn danger', onclick: async () => { await api('DELETE', '/api/stories/' + st.id); modal.remove(); document.querySelector('.stories-bar').innerHTML=''; loadStories(document.querySelector('.stories-bar')); } }, getSVG('trash', 18)) : null));
     document.body.append(modal);
   }
   
