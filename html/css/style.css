@@ -146,3 +146,32 @@ th { color: var(--lime1); background: var(--panel2); position: sticky; top: 0; }
 .fab-btn:active {
   transform: scale(0.9);
 }
+/* Стили для писем */
+.mail-item {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.mail-item:hover {
+  background: var(--panel2);
+}
+.mail-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.mail-subject {
+  font-weight: bold;
+  color: var(--lime1);
+  margin-bottom: 4px;
+}
+.mail-preview {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

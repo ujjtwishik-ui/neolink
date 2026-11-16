@@ -3,7 +3,6 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null, searchQuery: '' };
 
-  // ИЕРАРХИЯ ГАЛОЧЕК (для фронтенда)
   const hasPerm = (user, required) => {
     if (!user) return false;
     if (user.username === 'CEBA' || user.role === 'owner' || user.role === 'admin') return true;
@@ -21,7 +20,8 @@
       link: `<path fill="currentColor" d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>`,
       plus: `<path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>`,
       send: `<path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>`,
-      close: `<path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`
+      close: `<path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`,
+      mail: `<path fill="currentColor" d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>`
     };
     const span = document.createElement('span');
     span.style.display = 'inline-flex';
@@ -33,8 +33,7 @@
 
   const getCheckSVG = (color) => {
     if (!color || color === 'none') return null;
-    
-    let hex = '#8a9a7a'; // Серый по умолчанию
+    let hex = '#8a9a7a';
     if (color === 'green') hex = '#66ff00';
     if (color === 'gold') hex = '#ffd700';
     if (color === 'blue') hex = '#00bfff';
@@ -134,6 +133,7 @@
     const drawer = el('div', { class: 'side-drawer' },
       el('h2', { class: 'neon-text', style: 'margin-top:0' }, 'Меню'),
       el('div', { class: 'menu-item', onclick: () => { toggleMenu(); openProfile(); } }, 'Профиль'),
+      el('div', { class: 'menu-item', onclick: () => { toggleMenu(); openMail(); } }, 'Моя почта'),
       S.isAdmin ? el('div', { class: 'menu-item', onclick: () => location.href='/admin' }, 'Админ-панель') : null,
       el('div', { class: 'menu-item', onclick: logout }, 'Выйти'));
     const overlay = el('div', { class: 'side-overlay', onclick: toggleMenu }); document.body.append(drawer, overlay);
@@ -145,10 +145,92 @@
 
   function toggleMenu() { document.querySelector('.side-drawer').classList.toggle('open'); document.querySelector('.side-overlay').classList.toggle('open'); }
 
-  function openAddMenu() {
-    // ТУТ ИСПОЛЬЗУЕМ ИЕРАРХИЮ (минимум синяя)
-    const canCreateChannel = hasPerm(S.me, 'blue');
+  // --- МОЯ ПОЧТА ---
+  async function openMail() {
+    const modalContent = el('div');
+    const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, 
+      el('div', { class: 'card', style: 'max-width: 600px; width: 100%; height: 80vh; display: flex; flex-direction: column;' },
+        el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;' },
+          el('h3', { class: 'neon-text', style: 'margin:0;' }, 'Моя почта'),
+          el('span', { class: 'close', style: 'cursor:pointer; display:flex;', onclick: () => m.remove() }, getSVG('close', 24))
+        ),
+        modalContent
+      )
+    );
+    document.body.append(m);
 
+    try {
+      const res = await api('GET', '/api/mail/messages');
+      renderMailList(modalContent, res.messages);
+    } catch (e) {
+      if (e.status === 404) {
+        modalContent.replaceChildren(
+          el('div', { style: 'text-align:center; padding: 20px;' },
+            el('p', { style: 'color: var(--muted); margin-bottom: 20px;' }, 'У вас еще нет временной почты.'),
+            el('button', { class: 'btn', onclick: async () => {
+              try {
+                await api('POST', '/api/mail/generate');
+                toast('Почта создана!');
+                openMail(); // Перезагружаем
+                m.remove();
+              } catch(err) { toast(err.message); }
+            } }, 'Создать почту')
+          )
+        );
+      } else {
+        modalContent.replaceChildren(el('div', { style: 'color: var(--danger); padding: 20px; text-align: center;' }, e.message));
+      }
+    }
+  }
+
+  function renderMailList(container, messages) {
+    if (!messages.length) {
+      container.replaceChildren(el('div', { style: 'text-align:center; color: var(--muted); padding: 20px;' }, 'Входящих писем нет.'));
+      return;
+    }
+
+    const list = el('div', { style: 'flex: 1; overflow-y: auto;' },
+      ...messages.map(msg => el('div', {
+        style: 'padding: 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 4px;',
+        onclick: () => readMail(msg.id)
+      },
+        el('div', { style: 'display:flex; justify-content:space-between; font-size: 12px; color: var(--muted);' },
+          el('span', {}, msg.from.address),
+          el('span', {}, new Date(msg.createdAt).toLocaleString())
+        ),
+        el('div', { style: 'font-weight: bold; color: var(--lime1);' }, msg.subject || '(Без темы)'),
+        el('div', { style: 'font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' }, msg.intro)
+      ))
+    );
+    container.replaceChildren(list);
+  }
+
+  async function readMail(id) {
+    try {
+      const { message } = await api('GET', `/api/mail/messages/${id}`);
+      
+      const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, 
+        el('div', { class: 'card', style: 'max-width: 800px; width: 100%; height: 80vh; display: flex; flex-direction: column;' },
+          el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;' },
+            el('h3', { class: 'neon-text', style: 'margin:0; overflow:hidden; text-overflow: ellipsis; white-space: nowrap;' }, message.subject || '(Без темы)'),
+            el('span', { class: 'close', style: 'cursor:pointer; display:flex;', onclick: () => m.remove() }, getSVG('close', 24))
+          ),
+          el('div', { style: 'font-size: 12px; color: var(--muted); margin-bottom: 15px;' },
+            `От: ${message.from.name || message.from.address} <${message.from.address}>`
+          ),
+          el('div', { 
+            style: 'flex: 1; overflow-y: auto; background: #000; padding: 15px; border-radius: 8px;',
+            html: message.html ? message.html.join('') : `<pre style="white-space: pre-wrap;">${message.text || ''}</pre>`
+          })
+        )
+      );
+      document.body.append(m);
+    } catch(e) { toast(e.message); }
+  }
+
+  // --- ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ ---
+  function openAddMenu() {
+    const canCreateChannel = hasPerm(S.me, 'blue');
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Действия'),
       canCreateChannel ? el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал') : null,
@@ -348,7 +430,6 @@
   async function loadStories(container) {
     try {
       const { stories } = await api('GET', '/api/stories');
-      // ТУТ ИСПОЛЬЗУЕМ ИЕРАРХИЮ (минимум синяя)
       if (hasPerm(S.me, 'blue')) container.append(el('div', { class: 'story-item', onclick: createStory }, el('div', { class: 'story-avatar add' }, getSVG('plus', 24)), el('div', { class: 'story-name' }, 'Добавить')));
       stories.forEach(st => {
         const storyUser = { id: st.user_id, username: st.username, displayName: st.display_name, avatarUrl: st.avatar_url, checkmark: st.checkmark };
