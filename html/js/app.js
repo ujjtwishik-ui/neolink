@@ -136,29 +136,55 @@
     document.body.append(m);
   }
 
-  // ИСПРАВЛЕНА ФУНКЦИЯ ПОИСКА ЧЕЛОВЕКА
+  // ОБНОВЛЕННАЯ ФУНКЦИЯ ПОИСКА С ОШИБКОЙ И АВТОДОБАВЛЕНИЕМ В СПИСОК
   function findUser() {
     const un = el('input', { placeholder: 'Введите username' });
+    const errMsg = el('div', { style: 'color: var(--danger); font-size: 13px; margin-top: 8px; display: none; text-align: center;' }, 'Пользователь с таким ником не найден');
+    
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
-      el('h3', { class: 'neon-text' }, 'Поиск человека'), un,
+      el('h3', { class: 'neon-text', style: 'text-align:center;' }, 'Поиск человека'), 
+      un, 
+      errMsg,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
+        errMsg.style.display = 'none'; // Скрываем старую ошибку
         try { 
-          // Очищаем ввод от символа @, если он там есть
           const query = un.value.trim().replace(/^@/, '');
-          if (!query) return toast('Введите имя пользователя', 'error');
-          
-          const res = await api('GET', '/api/users?q=' + encodeURIComponent(query)); 
-          if (!res.users || res.users.length === 0) {
-             return toast('Пользователь не найден', 'error');
+          if (!query) {
+             errMsg.textContent = 'Введите имя пользователя';
+             errMsg.style.display = 'block';
+             return;
           }
           
+          const res = await api('GET', '/api/users?q=' + encodeURIComponent(query)); 
+          
+          if (!res.users || res.users.length === 0) {
+             errMsg.textContent = 'Пользователь не найден';
+             errMsg.style.display = 'block'; // Показываем ошибку под полем
+             return;
+          }
+          
+          const targetUser = res.users[0];
           m.remove(); 
-          openDm(res.users[0].id);
+          
+          // Мгновенно добавляем юзера в список чатов, если его там нет
+          if (!S.convs.some(c => c.user.id === targetUser.id)) {
+            S.convs.unshift({ 
+              user: targetUser, 
+              lastText: 'Нет сообщений', 
+              lastAt: new Date().toISOString(), 
+              lastId: Date.now() 
+            });
+            renderSide();
+          }
+
+          openDm(targetUser.id);
         } catch(e) { 
-          toast(e.message, 'error'); 
+          errMsg.textContent = e.message; 
+          errMsg.style.display = 'block';
         }
       } }, 'Найти и написать')));
     document.body.append(m);
+    setTimeout(() => un.focus(), 100);
   }
 
   function createChannel() {
@@ -306,7 +332,13 @@
     try { await NL.loadScript(NL.API + '/socket.io/socket.io.js'); } catch { return; }
     const s = (S.socket = io(NL.API || undefined, { auth: { token: NL.token() } }));
     s.on('message:new', (m) => { if (S.view.type === 'global') { S.msgs.push(m); renderMsgs(); } });
-    s.on('dm:new', (m) => { if (S.view.type === 'dm' && (m.senderId === S.view.peerId || m.recipientId === S.view.peerId)) { S.msgs.push(m); renderMsgs(); } else loadConvs(); });
+    s.on('dm:new', (m) => { 
+      if (S.view.type === 'dm' && (m.senderId === S.view.peerId || m.recipientId === S.view.peerId)) { 
+        S.msgs.push(m); renderMsgs(); 
+      } else { 
+        loadConvs(); 
+      } 
+    });
     s.on('channel:new', (data) => { if (S.view.type === 'channel' && S.view.channelId === data.channelId) { S.msgs.push(data.message); renderMsgs(); } });
   }
 
