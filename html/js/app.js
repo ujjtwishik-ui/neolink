@@ -3,6 +3,7 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null, searchQuery: '' };
 
+  // --- ГЕНЕРАТОР ИКОНОК ---
   const getSVG = (name, size = 20) => {
     const icons = {
       menu: `<path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>`,
@@ -23,10 +24,26 @@
     return span;
   };
 
+  // --- ЖЕСТКИЕ ЦВЕТА ДЛЯ ГАЛОЧЕК ---
   const getCheckSVG = (color) => {
-    if (!color) return null;
-    const s = document.createElement('span'); s.className = `badge-check check-${color}`;
-    s.innerHTML = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-1.9 14.5l-4.6-4.6 1.4-1.4 3.2 3.2 7.2-7.2 1.4 1.4-8.6 8.6z"/></svg>`;
+    if (!color || color === 'none') return null;
+    
+    let hex = '#8a9a7a'; // Серый по умолчанию
+    if (color === 'green') hex = '#66ff00';
+    if (color === 'blue') hex = '#00bfff';
+    if (color === 'gold') hex = '#ffd700';
+
+    const s = document.createElement('span'); 
+    s.style.display = 'inline-flex';
+    s.style.alignItems = 'center';
+    s.style.justifyContent = 'center';
+    s.style.width = '16px';
+    s.style.height = '16px';
+    s.style.marginLeft = '4px';
+    s.style.flexShrink = '0';
+    
+    // Цвет зашит прямо в fill, никакой CSS не перебьет
+    s.innerHTML = `<svg viewBox="0 0 24 24" style="width:100%; height:100%;"><path fill="${hex}" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-1.9 14.5l-4.6-4.6 1.4-1.4 3.2 3.2 7.2-7.2 1.4 1.4-8.6 8.6z"/></svg>`;
     return s;
   };
 
@@ -136,51 +153,37 @@
     document.body.append(m);
   }
 
-  // ОБНОВЛЕННАЯ ФУНКЦИЯ ПОИСКА С ОШИБКОЙ И АВТОДОБАВЛЕНИЕМ В СПИСОК
   function findUser() {
     const un = el('input', { placeholder: 'Введите username' });
     const errMsg = el('div', { style: 'color: var(--danger); font-size: 13px; margin-top: 8px; display: none; text-align: center;' }, 'Пользователь с таким ником не найден');
     
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text', style: 'text-align:center;' }, 'Поиск человека'), 
-      un, 
-      errMsg,
+      un, errMsg,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
-        errMsg.style.display = 'none'; // Скрываем старую ошибку
+        errMsg.style.display = 'none';
         try { 
           const query = un.value.trim().replace(/^@/, '');
-          if (!query) {
-             errMsg.textContent = 'Введите имя пользователя';
-             errMsg.style.display = 'block';
-             return;
-          }
+          if (!query) { errMsg.textContent = 'Введите имя пользователя'; errMsg.style.display = 'block'; return; }
           
           const res = await api('GET', '/api/users?q=' + encodeURIComponent(query)); 
           
           if (!res.users || res.users.length === 0) {
              errMsg.textContent = 'Пользователь не найден';
-             errMsg.style.display = 'block'; // Показываем ошибку под полем
+             errMsg.style.display = 'block';
              return;
           }
           
           const targetUser = res.users[0];
           m.remove(); 
           
-          // Мгновенно добавляем юзера в список чатов, если его там нет
           if (!S.convs.some(c => c.user.id === targetUser.id)) {
-            S.convs.unshift({ 
-              user: targetUser, 
-              lastText: 'Нет сообщений', 
-              lastAt: new Date().toISOString(), 
-              lastId: Date.now() 
-            });
+            S.convs.unshift({ user: targetUser, lastText: 'Нет сообщений', lastAt: new Date().toISOString(), lastId: Date.now() });
             renderSide();
           }
-
           openDm(targetUser.id);
         } catch(e) { 
-          errMsg.textContent = e.message; 
-          errMsg.style.display = 'block';
+          errMsg.textContent = e.message; errMsg.style.display = 'block';
         }
       } }, 'Найти и написать')));
     document.body.append(m);
@@ -332,13 +335,7 @@
     try { await NL.loadScript(NL.API + '/socket.io/socket.io.js'); } catch { return; }
     const s = (S.socket = io(NL.API || undefined, { auth: { token: NL.token() } }));
     s.on('message:new', (m) => { if (S.view.type === 'global') { S.msgs.push(m); renderMsgs(); } });
-    s.on('dm:new', (m) => { 
-      if (S.view.type === 'dm' && (m.senderId === S.view.peerId || m.recipientId === S.view.peerId)) { 
-        S.msgs.push(m); renderMsgs(); 
-      } else { 
-        loadConvs(); 
-      } 
-    });
+    s.on('dm:new', (m) => { if (S.view.type === 'dm' && (m.senderId === S.view.peerId || m.recipientId === S.view.peerId)) { S.msgs.push(m); renderMsgs(); } else loadConvs(); });
     s.on('channel:new', (data) => { if (S.view.type === 'channel' && S.view.channelId === data.channelId) { S.msgs.push(data.message); renderMsgs(); } });
   }
 
