@@ -3,7 +3,7 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null };
 
-  // --- ИСПРАВЛЕННЫЙ ГЕНЕРАТОР SVG (Возвращает DOM-элемент) ---
+  // --- ГЕНЕРАТОР SVG ИКОНОК ---
   const getSVG = (name, size = 20) => {
     const icons = {
       menu: `<path fill="currentColor" d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>`,
@@ -31,16 +31,54 @@
     return s;
   };
 
+  // --- АВТОРИЗАЦИЯ И РЕГИСТРАЦИЯ ---
   function showAuth() {
     let mode = 'login';
     const err = el('div', { class: 'err' });
-    const u = el('input', { type: 'text', placeholder: 'Username' });
+    
+    const u = el('input', { type: 'text', placeholder: 'Username (латиница)' });
+    const dn = el('input', { type: 'text', placeholder: 'Отображаемое имя (Ник)' });
     const p = el('input', { type: 'password', placeholder: 'Пароль' });
-    const submit = el('button', { class: 'btn', style: 'width:100%' }, 'Войти');
+    const dnField = el('div', { class: 'field', style: 'display: none;' }, dn);
+    const submit = el('button', { class: 'btn', style: 'width:100%; margin-top: 10px;' }, 'Войти');
+    
+    const tLogin = el('button', { class: 'btn ghost active', type: 'button', style: 'flex:1; margin-bottom: 15px;' }, 'Вход');
+    const tReg = el('button', { class: 'btn ghost', type: 'button', style: 'flex:1; margin-bottom: 15px;' }, 'Регистрация');
+
+    const setMode = (m) => {
+      mode = m; err.textContent = '';
+      tLogin.classList.toggle('active', m === 'login'); 
+      tReg.classList.toggle('active', m === 'register');
+      dnField.style.display = m === 'register' ? 'block' : 'none'; 
+      submit.textContent = m === 'login' ? 'Войти' : 'Создать аккаунт';
+      p.autocomplete = m === 'login' ? 'current-password' : 'new-password';
+    };
+    
+    tLogin.onclick = () => setMode('login'); 
+    tReg.onclick = () => setMode('register');
+
     const form = el('form', { onsubmit: async (e) => {
       e.preventDefault(); err.textContent = ''; submit.disabled = true;
-      try { const r = await api('POST', '/api/auth/' + mode, { username: u.value.trim(), password: p.value }); NL.setToken(r.token); await start(); } catch (ex) { err.textContent = ex.message; } finally { submit.disabled = false; }
-    } }, u, p, err, submit);
+      try {
+        const body = { username: u.value.trim(), password: p.value };
+        if (mode === 'register') body.displayName = dn.value.trim() || u.value.trim();
+        
+        const r = await api('POST', '/api/auth/' + mode, body);
+        NL.setToken(r.token); 
+        await start();
+      } catch (ex) { 
+        err.textContent = ex.message; 
+      } finally { 
+        submit.disabled = false; 
+      }
+    } }, 
+      el('div', { class: 'tabs', style: 'display:flex; gap: 8px;' }, tLogin, tReg),
+      el('div', { class: 'field' }, el('label', {}, 'Username'), u), 
+      dnField, 
+      el('div', { class: 'field' }, el('label', {}, 'Пароль'), p), 
+      err, submit
+    );
+
     root.replaceChildren(el('div', { class: 'auth-wrap' }, el('div', { class: 'card auth-card' }, el('h1', { class: 'neon-text' }, 'NeonLink'), form)));
   }
 
@@ -52,7 +90,6 @@
     $list = el('div', { class: 'list' });
     const me = el('div', { class: 'me', onclick: openProfile }, avatar(S.me, true), el('div', {}, el('b', { style: 'display:flex; align-items:center; gap:4px' }, S.me.displayName, getCheckSVG(S.me.checkmark)), el('small', {}, '@' + S.me.username)));
     
-    // Кнопка +
     const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, getSVG('plus', 28));
     
     const side = el('aside', { class: 'sidebar' },
@@ -104,8 +141,7 @@
         try { 
           const res = await api('GET', '/api/users?q=' + encodeURIComponent(un.value.trim())); 
           if (!res.users.length) return toast('Пользователь не найден');
-          m.remove();
-          openDm(res.users[0].id);
+          m.remove(); openDm(res.users[0].id);
         } catch(e) { toast(e.message); }
       } }, 'Найти и написать')));
     document.body.append(m);
@@ -198,9 +234,7 @@
     if (!confirm('Удалить канал навсегда? Это действие необратимо.')) return;
     try { 
       await api('DELETE', '/api/channels/' + id); 
-      toast('Канал удален'); 
-      await loadChannels();
-      openGlobal(true); 
+      toast('Канал удален'); await loadChannels(); openGlobal(true); 
     } catch(e) { toast(e.message); }
   }
 
@@ -208,9 +242,7 @@
     if (!confirm('Вы уверены, что хотите выйти из канала?')) return;
     try { 
       await api('DELETE', '/api/channels/' + id + '/leave'); 
-      toast('Вы вышли'); 
-      await loadChannels();
-      openGlobal(true); 
+      toast('Вы вышли'); await loadChannels(); openGlobal(true); 
     } catch(e) { toast(e.message); }
   }
 
