@@ -3,11 +3,12 @@
   const root = document.getElementById('root');
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], peer: null };
 
+  // НОВАЯ ИДЕАЛЬНАЯ ГАЛОЧКА
   const getCheckSVG = (color) => {
     if (!color) return null;
     const span = document.createElement('span');
     span.className = `badge-check check-${color}`;
-    span.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M12 1.5l2.7 2.2 3.4-.8.8 3.4 3.1 1.6-1.1 3.3 2 2.9-2.5 2.4.2 3.5-3.4.8-1.4 3.2-3.3-.8-2.6 2.4-2.6-2.4-3.3.8-1.4-3.2-3.4-.8.2-3.5L1.5 12l2-2.9-1.1-3.3 3.1-1.6.8-3.4 3.4.8L12 1.5z"/><path fill="#0a0a0a" d="M10.4 15.6l-3.2-3.2 1.4-1.4 1.8 1.8 4.6-4.6 1.4 1.4-6 6z"/></svg>`;
+    span.innerHTML = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm-1.9 14.5l-4.6-4.6 1.4-1.4 3.2 3.2 7.2-7.2 1.4 1.4-8.6 8.6z"/></svg>`;
     return span;
   };
 
@@ -35,7 +36,6 @@
 
     $list = el('div', { class: 'list' });
     
-    // Галочка добавлена к твоему имени в шапке
     const me = el('div', { class: 'me', onclick: openProfile }, 
       avatar(S.me, true), 
       el('div', { style: 'min-width:0; display:flex; flex-direction:column;' }, 
