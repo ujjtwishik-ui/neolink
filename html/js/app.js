@@ -21,7 +21,7 @@
       plus: `<path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>`,
       send: `<path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>`,
       close: `<path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`,
-      mail: `<path fill="currentColor" d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>`
+      copy: `<path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>`
     };
     const span = document.createElement('span');
     span.style.display = 'inline-flex';
@@ -161,7 +161,20 @@
 
     try {
       const res = await api('GET', '/api/mail/messages');
-      renderMailList(modalContent, res.messages);
+      // Добавляем блок с адресом почты
+      const addressBlock = el('div', { style: 'text-align:center; margin-bottom: 15px; padding: 10px; background: var(--panel2); border-radius: 8px; border: 1px solid var(--line);' },
+        el('div', { style: 'font-size: 12px; color: var(--muted); margin-bottom: 4px;' }, 'Ваш адрес (нажмите, чтобы скопировать):'),
+        el('div', { 
+          style: 'font-size: 18px; font-weight: bold; color: var(--lime1); cursor: pointer; word-break: break-all;',
+          onclick: () => { navigator.clipboard.writeText(res.address); toast('Адрес скопирован!'); }
+        }, res.address)
+      );
+      modalContent.append(addressBlock);
+      
+      const listContainer = el('div', { style: 'flex: 1; overflow-y: auto;' });
+      modalContent.append(listContainer);
+      
+      renderMailList(listContainer, res.messages);
     } catch (e) {
       if (e.status === 404) {
         modalContent.replaceChildren(
@@ -171,8 +184,8 @@
               try {
                 await api('POST', '/api/mail/generate');
                 toast('Почта создана!');
-                openMail(); // Перезагружаем
                 m.remove();
+                openMail(); // Перезагружаем
               } catch(err) { toast(err.message); }
             } }, 'Создать почту')
           )
@@ -189,9 +202,11 @@
       return;
     }
 
-    const list = el('div', { style: 'flex: 1; overflow-y: auto;' },
+    const list = el('div', { style: 'display: flex; flex-direction: column;' },
       ...messages.map(msg => el('div', {
-        style: 'padding: 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 4px;',
+        style: 'padding: 12px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: background 0.2s;',
+        onmouseover: (e) => e.currentTarget.style.background = 'var(--panel2)',
+        onmouseout: (e) => e.currentTarget.style.background = 'transparent',
         onclick: () => readMail(msg.id)
       },
         el('div', { style: 'display:flex; justify-content:space-between; font-size: 12px; color: var(--muted);' },
@@ -228,7 +243,7 @@
     } catch(e) { toast(e.message); }
   }
 
-  // --- ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ ---
+  // --- ОСТАЛЬНОЙ КОД ---
   function openAddMenu() {
     const canCreateChannel = hasPerm(S.me, 'blue');
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },

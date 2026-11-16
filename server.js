@@ -299,7 +299,7 @@ app.get('/api/mail/messages', auth, wrap(async (req, res) => {
 
   if (!r.ok) throw new Error('Ошибка загрузки писем');
   const data = await r.json();
-  res.json({ messages: data['hydra:member'] || [] });
+  res.json({ messages: data['hydra:member'] || [], address: acc.address });
 }));
 
 app.get('/api/mail/messages/:id', auth, wrap(async (req, res) => {
