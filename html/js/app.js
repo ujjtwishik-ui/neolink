@@ -21,7 +21,7 @@
       plus: `<path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>`,
       send: `<path fill="currentColor" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>`,
       close: `<path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>`,
-      copy: `<path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>`
+      help: `<path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/>`
     };
     const span = document.createElement('span');
     span.style.display = 'inline-flex';
@@ -145,13 +145,32 @@
 
   function toggleMenu() { document.querySelector('.side-drawer').classList.toggle('open'); document.querySelector('.side-overlay').classList.toggle('open'); }
 
-  // --- МОЯ ПОЧТА ---
+  // --- ПОЧТА ---
+  function showMailHelp() {
+    const modal = el('div', { class: 'modal', style: 'z-index: 300;', onclick: (e) => e.target === modal && modal.remove() }, 
+      el('div', { class: 'card', style: 'max-width: 450px;' },
+        el('h3', { class: 'neon-text', style: 'margin-top:0;' }, 'О временной почте'),
+        el('div', { style: 'color: var(--text); line-height: 1.6; font-size: 14px; display: flex; flex-direction: column; gap: 10px;' },
+          el('p', { style: 'margin:0;' }, 'Этот сервис использует платформу mail.tm для создания временных почтовых ящиков.'),
+          el('p', { style: 'margin:0;' }, el('b', { style: 'color: var(--lime1);' }, 'Важно: '), 'Ваш адрес привязан к аккаунту NeonLink, но если вы не будете заходить в раздел «Моя почта» в течение длительного времени (обычно от 7 до 30 дней), сервис mail.tm может удалить ящик для очистки своих серверов.'),
+          el('p', { style: 'margin:0;' }, 'В этом случае вы всегда сможете создать новый ящик в пару кликов.')
+        ),
+        el('button', { class: 'btn', style: 'margin-top: 20px; width: 100%;', onclick: () => modal.remove() }, 'Понятно')
+      )
+    );
+    document.body.append(modal);
+  }
+
   async function openMail() {
     const modalContent = el('div');
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, 
       el('div', { class: 'card', style: 'max-width: 600px; width: 100%; height: 80vh; display: flex; flex-direction: column;' },
+        // ЗАГОЛОВОК С КНОПКОЙ ?
         el('div', { style: 'display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;' },
-          el('h3', { class: 'neon-text', style: 'margin:0;' }, 'Моя почта'),
+          el('div', { style: 'display: flex; align-items: center; gap: 8px;' },
+            el('h3', { class: 'neon-text', style: 'margin:0;' }, 'Моя почта'),
+            el('span', { style: 'cursor:pointer; color: var(--muted); display:flex;', onclick: showMailHelp, title: 'Справка' }, getSVG('help', 20))
+          ),
           el('span', { class: 'close', style: 'cursor:pointer; display:flex;', onclick: () => m.remove() }, getSVG('close', 24))
         ),
         modalContent
@@ -161,7 +180,6 @@
 
     try {
       const res = await api('GET', '/api/mail/messages');
-      // Добавляем блок с адресом почты
       const addressBlock = el('div', { style: 'text-align:center; margin-bottom: 15px; padding: 10px; background: var(--panel2); border-radius: 8px; border: 1px solid var(--line);' },
         el('div', { style: 'font-size: 12px; color: var(--muted); margin-bottom: 4px;' }, 'Ваш адрес (нажмите, чтобы скопировать):'),
         el('div', { 
@@ -185,7 +203,7 @@
                 await api('POST', '/api/mail/generate');
                 toast('Почта создана!');
                 m.remove();
-                openMail(); // Перезагружаем
+                openMail(); 
               } catch(err) { toast(err.message); }
             } }, 'Создать почту')
           )
