@@ -26,7 +26,7 @@
     $list = el('div', { class: 'list' });
     const me = el('div', { class: 'me', onclick: openProfile }, avatar(S.me, true), el('div', {}, el('b', { style: 'display:flex; align-items:center; gap:4px' }, S.me.displayName, getCheckSVG(S.me.checkmark)), el('small', {}, '@' + S.me.username)));
     
-    // Кнопка + (Добавить канал) в правом нижнем углу сайдбара
+    // Кнопка + (Добавить канал / Найти человека)
     const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, '+');
     
     const side = el('aside', { class: 'sidebar' },
@@ -58,14 +58,30 @@
 
   function toggleMenu() { document.querySelector('.side-drawer').classList.toggle('open'); document.querySelector('.side-overlay').classList.toggle('open'); }
 
-  // --- МЕНЮ ДОБАВЛЕНИЯ (КАНАЛ / ВХОД ПО КОДУ) ---
+  // --- МЕНЮ ДОБАВЛЕНИЯ (КАНАЛ / ЛЮДИ) ---
   function openAddMenu() {
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Действия'),
-      el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал (Нужна зеленая галка)'),
+      el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал'),
       el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); joinChannel(); } }, 'Войти по коду канала'),
+      el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); findUser(); } }, 'Найти человека (Начать чат)'),
       el('button', { class: 'btn ghost', style: 'width:100%', onclick: () => m.remove() }, 'Отмена')
     ));
+    document.body.append(m);
+  }
+
+  function findUser() {
+    const un = el('input', { placeholder: 'Введите @username' });
+    const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
+      el('h3', { class: 'neon-text' }, 'Поиск человека'), un,
+      el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
+        try { 
+          const res = await api('GET', '/api/users?q=' + encodeURIComponent(un.value.trim())); 
+          if (!res.users.length) return toast('Пользователь не найден');
+          m.remove();
+          openDm(res.users[0].id);
+        } catch(e) { toast(e.message); }
+      } }, 'Найти и написать')));
     document.body.append(m);
   }
 
@@ -98,9 +114,7 @@
     const channelItems = S.channels.map(c => {
       const av = c.avatar_url ? el('img', { src: c.avatar_url, style: 'width:100%; height:100%; border-radius:50%' }) : el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; font-weight:bold; font-size:20px' }, '📢');
       return el('div', { class: 'item' + (S.view.type === 'channel' && S.view.channelId === c.id ? ' active' : ''), onclick: () => openChannel(c) }, 
-        av, 
-        el('div', { class: 'meta' }, el('b', {}, c.name, getCheckSVG(c.checkmark)), el('span', {}, c.description || 'Канал'))
-      );
+        av, el('div', { class: 'meta' }, el('b', {}, c.name, getCheckSVG(c.checkmark)), el('span', {}, c.description || 'Канал')));
     });
     $list.replaceChildren(g, ...channelItems, ...S.convs.map((c) => userItem(c.user, c.lastText)));
   }
@@ -113,32 +127,56 @@
   function openGlobal(showChat) {
     S.view = { type: 'global' }; $title.textContent = '# Общая лента'; $headActions.replaceChildren(); S.msgs = []; renderSide(); loadHistory(); if (showChat) $app.classList.add('in-chat');
   }
+  
   async function openDm(id) {
     S.view = { type: 'dm', peerId: id }; $title.textContent = 'Загрузка...'; $headActions.replaceChildren(); S.msgs = []; await loadHistory(); renderSide(); $app.classList.add('in-chat');
   }
+
   async function openChannel(c) {
     S.view = { type: 'channel', channelId: c.id }; $title.textContent = c.name; S.currentChannel = c;
     
-    // Если я владелец - добавляю кнопку "Добавить юзера" и "Код"
+    // Кнопки управления каналом
     if (c.owner_id === S.me.id || S.me.username === 'CEBA') {
       $headActions.replaceChildren(
-        el('button', { class: 'btn ghost small', onclick: () => addUserToChannel(c.id) }, '+ Юзер'),
-        el('button', { class: 'btn ghost small', onclick: () => alert('Код приглашения: ' + c.invite_code) }, 'Код')
+        el('button', { class: 'btn ghost small', onclick: () => editMyChannel(c) }, '⚙️'),
+        el('button', { class: 'btn ghost small', onclick: () => alert('Код приглашения: ' + c.invite_code) }, 'Код'),
+        el('button', { class: 'btn danger small', onclick: () => leaveChannel(c.id) }, 'Выйти')
       );
-    } else { $headActions.replaceChildren(); }
+    } else {
+      $headActions.replaceChildren(el('button', { class: 'btn danger small', onclick: () => leaveChannel(c.id) }, 'Выйти'));
+    }
 
     S.msgs = []; await loadHistory(); renderSide(); $app.classList.add('in-chat');
     if (S.socket) S.socket.emit('join:channel', c.id);
   }
 
-  function addUserToChannel(chId) {
-    const un = el('input', { placeholder: 'Username (без @)' });
+  // Редактирование своего канала (с загрузкой аватарки)
+  function editMyChannel(c) {
+    const name = el('input', { value: c.name }); 
+    const desc = el('input', { value: c.description || '' }); 
+    let dUrl = null;
+    const file = el('input', { type: 'file', accept: 'image/*', style: 'margin-top:10px' });
+    
+    file.onchange = async () => {
+      if (file.files[0]) { dUrl = await resizeImage(file.files[0], 160); toast('Файл загружен'); }
+    };
+
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
-      el('h3', { class: 'neon-text' }, 'Добавить в канал'), un,
+      el('h3', { class: 'neon-text' }, 'Настройки канала'), name, desc, el('label', {}, 'Аватарка (картинка):'), file,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
-        try { await api('POST', '/api/channels/' + chId + '/members', { username: un.value.trim() }); toast('Пользователь добавлен'); m.remove(); } catch(e) { toast(e.message); }
-      } }, 'Добавить')));
+        try {
+          const b = { name: name.value, description: desc.value };
+          if (dUrl) b.avatar_url = dUrl;
+          await api('PATCH', '/api/channels/' + c.id, b); 
+          toast('Сохранено'); m.remove(); loadChannels(); openChannel({...c, name: name.value, description: desc.value, avatar_url: dUrl || c.avatar_url});
+        } catch(e) { toast(e.message); }
+      } }, 'Сохранить')));
     document.body.append(m);
+  }
+
+  async function leaveChannel(id) {
+    if (!confirm('Вы уверены, что хотите выйти из канала?')) return;
+    try { await api('DELETE', '/api/channels/' + id + '/leave'); toast('Вы вышли'); loadChannels(); openGlobal(true); } catch(e) { toast(e.message); }
   }
 
   async function loadHistory() {
@@ -186,12 +224,14 @@
       });
     } catch(e) {}
   }
+  
   function openStory(st, storyUser) {
     const modal = el('div', { class: 'story-modal' }, el('div', { class: 'story-modal-head' }, avatar(storyUser, false), el('b', {}, storyUser.displayName, getCheckSVG(storyUser.checkmark)), el('div', { style: 'flex:1' }), el('span', { class: 'close', onclick: () => modal.remove() }, '✕')),
       el('div', { class: 'story-modal-content' }, st.content.startsWith('data:image') ? el('img', { src: st.content }) : el('div', { class: 'text-story' }, st.content)),
       el('div', { class: 'story-modal-foot' }, (st.user_id === S.me.id || S.me.username === 'CEBA') ? el('button', { class: 'btn danger', onclick: async () => { await api('DELETE', '/api/stories/' + st.id); modal.remove(); document.querySelector('.stories-bar').innerHTML=''; loadStories(document.querySelector('.stories-bar')); } }, 'Удалить') : null));
     document.body.append(modal);
   }
+  
   async function createStory() {
     const ti = el('input', { placeholder: 'Текст' }); const fi = el('input', { type: 'file', accept: 'image/*', style: 'margin-top:10px' }); let b64 = null;
     fi.onchange = async () => { const f = fi.files[0]; if (f) { b64 = await resizeImage(f, 400); ti.value = 'Картинка'; } };
@@ -201,12 +241,14 @@
   }
 
   async function loadConvs() { try { S.convs = (await api('GET', '/api/dm/conversations')).conversations; } catch {} renderSide(); }
+  
   function openProfile() {
     const dn = el('input', { value: S.me.displayName }); const url = el('input', { value: S.me.avatarUrl.startsWith('data:') ? '' : S.me.avatarUrl }); let dUrl = null;
     const m = el('div', { class: 'modal' }, el('div', { class: 'card' }, el('h3', { class: 'neon-text' }, 'Профиль'), dn, url, el('input', { type: 'file', onchange: async (e) => { if (e.target.files[0]) dUrl = await resizeImage(e.target.files[0], 160); } }),
       el('button', { class: 'btn', style: 'margin-top:10px; width:100%', onclick: async () => { const b = { displayName: dn.value }; if(dUrl) b.avatarUrl = dUrl; else if(url.value !== S.me.avatarUrl) b.avatarUrl = url.value; S.me = (await api('PATCH', '/api/me', b)).user; m.remove(); showApp(); } }, 'Сохр.')));
     document.body.append(m);
   }
+  
   function resizeImage(file, size) { return new Promise((res) => { const img = new Image(); const fr = new FileReader(); fr.onload = () => { img.src = fr.result; }; img.onload = () => { const c = document.createElement('canvas'); c.width = c.height = size; const k = Math.max(size / img.width, size / img.height); c.getContext('2d').drawImage(img, (size - img.width * k) / 2, (size - img.height * k) / 2, img.width * k, img.height * k); res(c.toDataURL('image/jpeg', 0.85)); }; fr.readAsDataURL(file); }); }
   
   function logout() { NL.setToken(''); location.reload(); }

@@ -206,6 +206,29 @@ app.post('/api/channels/:id/messages', auth, writeGuard, wrap(async (req, res) =
   res.json({ message: out });
 }));
 
+// Редактирование СВОЕГО канала (или админом)
+app.patch('/api/channels/:id', auth, wrap(async (req, res) => {
+  const chId = parseInt(req.params.id);
+  const ch = (await q('SELECT * FROM channels WHERE id=$1', [chId])).rows[0];
+  if (!ch) return res.status(404).json({ error: 'Not found' });
+  if (ch.owner_id !== req.user.id && req.user.username !== 'CEBA') return res.status(403).json({ error: 'Нет прав' });
+
+  const f = {}; const b = req.body;
+  if (b.name !== undefined) f.name = b.name;
+  if (b.description !== undefined) f.description = b.description;
+  if (b.avatar_url !== undefined) f.avatar_url = b.avatar_url;
+
+  const keys = Object.keys(f); if (!keys.length) return res.json({ ok: true });
+  const r = await q(`UPDATE channels SET ${keys.map((k, i) => `${k}=$${i+1}`).join(',')} WHERE id=$${keys.length+1} RETURNING *`, [...keys.map(k => f[k]), chId]);
+  res.json({ channel: r.rows[0] });
+}));
+
+// Выход из канала
+app.delete('/api/channels/:id/leave', auth, wrap(async (req, res) => {
+  await q('DELETE FROM channel_members WHERE channel_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+  res.json({ ok: true });
+}));
+
 // --- ИСТОРИИ ---
 app.get('/api/stories', auth, wrap(async (req, res) => {
   const r = await q(`SELECT s.*, u.username, u.display_name, u.avatar_url, u.checkmark FROM stories s JOIN users u ON u.id = s.user_id WHERE s.created_at > NOW() - INTERVAL '24 hours' ORDER BY s.id DESC`);
