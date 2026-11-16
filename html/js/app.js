@@ -1,9 +1,8 @@
 (function () {
   const { el, api, avatar, fmt, toast } = NL;
   const root = document.getElementById('root');
-  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], socket: null, msgs: [], peer: null };
+  const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null };
 
-  // НОВАЯ ИДЕАЛЬНАЯ ГАЛОЧКА
   const getCheckSVG = (color) => {
     if (!color) return null;
     const span = document.createElement('span');
@@ -80,12 +79,22 @@
 
     $app = el('div', { class: 'app' }, side, chat);
     root.replaceChildren($app);
-    connectSocket(); loadConvs(); openGlobal(false);
+    
+    connectSocket(); 
+    loadChannels(); // <--- Загружаем каналы
+    loadConvs(); 
+    openGlobal(false);
   }
 
   function toggleMenu() {
     document.querySelector('.side-drawer').classList.toggle('open');
     document.querySelector('.side-overlay').classList.toggle('open');
+  }
+
+  // --- ЗАГРУЗКА КАНАЛОВ ---
+  async function loadChannels() {
+    try { S.channels = (await api('GET', '/api/channels')).channels; } catch(e) { console.error(e); }
+    renderSide();
   }
 
   async function loadStories(container) {
@@ -150,20 +159,39 @@
     document.body.append(m);
   }
 
+  // --- СОЗДАНИЕ КАНАЛА ---
   function createChannel() {
     const name = el('input', { type: 'text', placeholder: 'Название канала' });
     const desc = el('input', { type: 'text', placeholder: 'Описание' });
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Создать канал'), name, desc,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
-        try { await api('POST', '/api/channels', { name: name.value, description: desc.value }); toast('Канал создан'); m.remove(); } catch(e) { toast(e.message); }
+        if (!name.value.trim()) return toast('Введите название', 'error');
+        try { 
+          await api('POST', '/api/channels', { name: name.value, description: desc.value }); 
+          toast('Канал создан'); 
+          m.remove(); 
+          loadChannels(); // <--- Обновляем список каналов в меню
+        } catch(e) { toast(e.message); }
       } }, 'Создать')));
     document.body.append(m);
   }
 
   function renderSide() {
     const g = el('div', { class: 'item' + (S.view.type === 'global' ? ' active' : ''), onclick: () => openGlobal(true) }, el('div', { class: 'avatar' }, '#'), el('div', { class: 'meta' }, el('b', {}, 'Общая лента')));
-    $list.replaceChildren(g, ...S.convs.map((c) => userItem(c.user, c.lastText)));
+    
+    // Рендерим каналы
+    const channelItems = S.channels.map(c => 
+      el('div', { class: 'item', onclick: () => toast('Вход в канал ' + c.name + ' пока в разработке') }, 
+        el('div', { class: 'avatar', style: 'background:#1b241b; color:#ccff00; font-weight:bold;' }, '📢'), 
+        el('div', { class: 'meta' }, 
+          el('b', {}, c.name, getCheckSVG(c.checkmark)),
+          el('span', {}, c.description || 'Канал')
+        )
+      )
+    );
+
+    $list.replaceChildren(g, ...channelItems, ...S.convs.map((c) => userItem(c.user, c.lastText)));
   }
 
   function userItem(u, sub) {
