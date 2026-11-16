@@ -123,3 +123,26 @@ th { color: var(--lime1); background: var(--panel2); position: sticky; top: 0; }
   .tbl-wrap { border-radius: 8px; }
   th, td { padding: 8px 10px; font-size: 12px; }
 }
+/* Добавь в конец файла style.css */
+.fab-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--grad);
+  color: #0a0a0a;
+  font-size: 32px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(204, 255, 0, 0.4);
+  transition: transform 0.2s;
+  z-index: 20;
+}
+.fab-btn:active {
+  transform: scale(0.9);
+}
