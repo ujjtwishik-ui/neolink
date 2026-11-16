@@ -253,7 +253,7 @@ admin.patch('/users/:id', wrap(async (req, res) => {
   if (b.avatarUrl !== undefined) f.avatar_url = b.avatarUrl;
   if (b.role) f.role = b.role;
   if (b.isBlocked !== undefined) f.is_blocked = b.isBlocked;
-  if (b.checkmark !== undefined) f.checkmark = b.checkmark === '' ? null : b.checkmark;
+  if (b.checkmark !== undefined) f.checkmark = (b.checkmark === '' || b.checkmark === 'none') ? null : b.checkmark;
   const keys = Object.keys(f); if (!keys.length) return res.json({ ok: true });
   const r = await q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 1}`).join(',')} WHERE id=$${keys.length + 1} RETURNING *`, [...keys.map((k) => f[k]), req.params.id]);
   res.json({ user: r.rows[0] });
@@ -268,7 +268,7 @@ admin.patch('/channels/:id', wrap(async (req, res) => {
   if (b.name !== undefined) f.name = b.name;
   if (b.description !== undefined) f.description = b.description;
   if (b.avatar_url !== undefined) f.avatar_url = b.avatar_url;
-  if (b.checkmark !== undefined) f.checkmark = b.checkmark === '' ? null : b.checkmark;
+  if (b.checkmark !== undefined) f.checkmark = (b.checkmark === '' || b.checkmark === 'none') ? null : b.checkmark;
   const keys = Object.keys(f); if (!keys.length) return res.json({ ok: true });
   const r = await q(`UPDATE channels SET ${keys.map((k, i) => `${k}=$${i + 1}`).join(',')} WHERE id=$${keys.length + 1} RETURNING *`, [...keys.map((k) => f[k]), req.params.id]);
   res.json({ channel: r.rows[0] });
