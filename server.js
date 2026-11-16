@@ -16,11 +16,15 @@ const {
   OWNER_USERNAME = 'CEBA', OWNER_PASSWORD, CORS_ORIGINS = '', PORT = 3000,
 } = process.env;
 
+if (!DATABASE_URL) throw new Error('DATABASE_URL is not set');
+if (!JWT_SECRET || JWT_SECRET.length < 16) throw new Error('JWT_SECRET is not set (min 16 chars)');
+
 const EDIT_WINDOW_MS = 15 * 60 * 1000;
 const MAX_TEXT = 2000;
 const PAGE = 50;
 
-const pool = new Pool({ connectionString: DATABASE_URL, ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false }, max: 10 });
+const isLocal = /localhost|127\.0\.0\.1/.test(DATABASE_URL);
+const pool = new Pool({ connectionString: DATABASE_URL, ssl: isLocal ? false : { rejectUnauthorized: false }, max: 10 });
 const q = (text, params) => pool.query(text, params);
 
 async function initDb() {
@@ -28,13 +32,25 @@ async function initDb() {
   if (OWNER_PASSWORD) {
     const hash = await bcrypt.hash(OWNER_PASSWORD, 12);
     const ex = await q('SELECT id FROM users WHERE LOWER(username)=LOWER($1)', [OWNER_USERNAME]);
-    if (!ex.rows.length) await q(`INSERT INTO users (username,password_hash,display_name,role) VALUES ($1,$2,$1,'owner')`, [OWNER_USERNAME, hash]);
-    else await q(`UPDATE users SET role='owner', is_blocked=FALSE WHERE id=$1`, [ex.rows[0].id]);
+    if (!ex.rows.length) {
+      await q(`INSERT INTO users (username,password_hash,display_name,role) VALUES ($1,$2,$1,'owner')`, [OWNER_USERNAME, hash]);
+    } else {
+      await q(`UPDATE users SET role='owner', is_blocked=FALSE WHERE id=$1`, [ex.rows[0].id]);
+    }
   }
 }
 
-async function isMaintenance() { const r = await q(`SELECT value FROM settings WHERE key='maintenance'`); return r.rows[0]?.value === true; }
-async function audit(user, action, details = {}, ip = '') { try { await q('INSERT INTO audit_logs (user_id, username, action, details, ip) VALUES ($1,$2,$3,$4,$5)', [user?.id ?? null, user?.username ?? null, action, JSON.stringify(details), ip]); } catch (e) {} }
+async function isMaintenance() {
+  const r = await q(`SELECT value FROM settings WHERE key='maintenance'`);
+  return r.rows[0]?.value === true;
+}
+
+async function audit(user, action, details = {}, ip = '') {
+  try {
+    await q('INSERT INTO audit_logs (user_id, username, action, details, ip) VALUES ($1,$2,$3,$4,$5)',
+      [user?.id ?? null, user?.username ?? null, action, JSON.stringify(details), ip]);
+  } catch (e) { console.error('audit failed', e.message); }
+}
 
 const publicUser = (u) => ({ id: u.id, username: u.username, displayName: u.display_name, avatarUrl: u.avatar_url, role: u.role, checkmark: u.checkmark });
 const isOwner = (u) => u && u.username === OWNER_USERNAME;
@@ -46,25 +62,33 @@ function cleanAvatar(u) { if (u === '' || u == null) return ''; if (typeof u !==
 const clientIp = (req) => req.ip || req.socket?.remoteAddress || '';
 
 async function verifyCaptcha(token, ip) {
-  if (!RECAPTCHA_SECRET) return true; if (!token) return false;
+  if (!RECAPTCHA_SECRET) return true;
+  if (!token) return false;
   try {
-    const r = await fetch('https://www.google.com/recaptcha/api/siteverify', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ secret: RECAPTCHA_SECRET, response: token, remoteip: ip }) });
-    const d = await r.json(); return d.success === true && (d.score === undefined || d.score >= 0.5);
+    const r = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret: RECAPTCHA_SECRET, response: token, remoteip: ip }),
+    });
+    const d = await r.json();
+    return d.success === true && (d.score === undefined || d.score >= 0.5);
   } catch { return false; }
 }
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => { console.error(e); res.status(500).json({ error: 'Server error' }); });
 
-const app = express(); app.set('trust proxy', 1);
+const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
-const corsOpts = { origin: (o, cb) => cb(null, !o || CORS_ORIGINS.split(',').includes(o) || o === `http://localhost:${PORT}`), credentials: false };
+const allowed = CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+const corsOpts = { origin: (o, cb) => cb(null, !o || allowed.includes(o) || o === `http://localhost:${PORT}`), credentials: false };
 const io = new Server(server, { cors: corsOpts });
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors(corsOpts)); app.use(express.json({ limit: '300kb' }));
+app.use(cors(corsOpts));
+app.use(express.json({ limit: '300kb' }));
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30 });
-const regLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10 });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+const regLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
 const sendLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, keyGenerator: (req) => `u${req.user?.id}`, validate: false });
 
 app.get('/healthz', (_, res) => res.send('ok'));
@@ -74,8 +98,10 @@ async function auth(req, res, next) {
   const h = req.headers.authorization || '';
   try {
     const p = jwt.verify(h.startsWith('Bearer ') ? h.slice(7) : '', JWT_SECRET);
-    const u = (await q('SELECT * FROM users WHERE id=$1', [p.id])).rows[0];
-    if (!u) return res.status(401).json({ error: 'Unauthorized' }); if (u.is_blocked) return res.status(403).json({ error: 'Account blocked' });
+    const r = await q('SELECT * FROM users WHERE id=$1', [p.id]);
+    const u = r.rows[0];
+    if (!u) return res.status(401).json({ error: 'Unauthorized' });
+    if (u.is_blocked) return res.status(403).json({ error: 'Account blocked' });
     req.user = u; next();
   } catch { res.status(401).json({ error: 'Unauthorized' }); }
 }
@@ -91,73 +117,110 @@ app.post('/api/auth/register', regLimiter, wrap(async (req, res) => {
   if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Bad password' });
   if (username.toLowerCase() === OWNER_USERNAME.toLowerCase()) return res.status(400).json({ error: 'Reserved username' });
   const dn = (typeof displayName === 'string' && displayName.trim().slice(0, 64)) || username;
+  const hash = await bcrypt.hash(password, 12);
   try {
-    const r = await q(`INSERT INTO users (username,password_hash,display_name) VALUES ($1,$2,$3) RETURNING *`, [username, await bcrypt.hash(password, 12), dn]);
+    const r = await q(`INSERT INTO users (username,password_hash,display_name) VALUES ($1,$2,$3) RETURNING *`, [username, hash, dn]);
+    await audit(r.rows[0], 'register', {}, clientIp(req));
     res.json({ token: signToken(r.rows[0]), user: publicUser(r.rows[0]) });
   } catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Username taken' }); throw e; }
 }));
 
 app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
   const { username, password } = req.body || {};
-  const u = (await q('SELECT * FROM users WHERE LOWER(username)=LOWER($1)', [String(username || '')])).rows[0];
-  if (!u || typeof password !== 'string' || !(await bcrypt.compare(password, u.password_hash))) return res.status(401).json({ error: 'Invalid credentials' });
+  const r = await q('SELECT * FROM users WHERE LOWER(username)=LOWER($1)', [String(username || '')]);
+  const u = r.rows[0];
+  const ok = u && typeof password === 'string' && (await bcrypt.compare(password, u.password_hash));
+  if (!ok) { await audit(null, 'login_failed', {}, clientIp(req)); return res.status(401).json({ error: 'Invalid credentials' }); }
   if (u.is_blocked) return res.status(403).json({ error: 'Blocked' });
+  await q('UPDATE users SET last_login=NOW() WHERE id=$1', [u.id]);
   res.json({ token: signToken(u), user: publicUser(u) });
 }));
 
 app.get('/api/me', auth, (req, res) => res.json({ user: publicUser(req.user), isAdmin: isOwner(req.user) }));
+
 app.patch('/api/me', auth, wrap(async (req, res) => {
-  const av = req.body.avatarUrl === undefined ? req.user.avatar_url : cleanAvatar(req.body.avatarUrl);
-  const dn = typeof req.body.displayName === 'string' ? req.body.displayName.trim().slice(0, 64) : req.user.display_name;
+  const { displayName, avatarUrl } = req.body || {};
+  const dn = typeof displayName === 'string' ? displayName.trim().slice(0, 64) : req.user.display_name;
+  const av = avatarUrl === undefined ? req.user.avatar_url : cleanAvatar(avatarUrl);
+  if (!dn || av === null) return res.status(400).json({ error: 'Invalid data' });
   const r = await q('UPDATE users SET display_name=$1, avatar_url=$2 WHERE id=$3 RETURNING *', [dn, av, req.user.id]);
   res.json({ user: publicUser(r.rows[0]) });
 }));
 
 app.get('/api/users', auth, wrap(async (req, res) => {
   const s = String(req.query.q || '').trim();
-  const r = await q(`SELECT id,username,display_name,avatar_url,role,checkmark FROM users WHERE id<>$1 AND is_blocked=FALSE AND ($2='' OR username ILIKE $3) ORDER BY username LIMIT 30`, [req.user.id, s, `%${s.replace(/[%_]/g, '')}%`]);
+  const r = await q(`SELECT id,username,display_name,avatar_url,role,checkmark FROM users WHERE id<>$1 AND is_blocked=FALSE AND ($2='' OR username ILIKE $3 OR display_name ILIKE $3) ORDER BY username LIMIT 30`, [req.user.id, s, `%${s.replace(/[%_]/g, '')}%`]);
   res.json({ users: r.rows.map(publicUser) });
 }));
 
+// --- СООБЩЕНИЯ В ОБЩЕЙ ЛЕНТЕ ---
 const msgSelect = `SELECT m.id,m.text,m.created_at,m.edited_at,m.edited_by_admin, u.id AS uid,u.username,u.display_name,u.avatar_url,u.role,u.checkmark FROM messages m JOIN users u ON u.id=m.user_id`;
 const msgOut = (r) => ({ id: r.id, text: r.text, createdAt: r.created_at, editedAt: r.edited_at, editedByAdmin: r.edited_by_admin, user: { id: r.uid, username: r.username, displayName: r.display_name, avatarUrl: r.avatar_url, role: r.role, checkmark: r.checkmark } });
 
 app.get('/api/messages', auth, wrap(async (req, res) => {
-  const r = await q(`${msgSelect} WHERE m.id<$1 ORDER BY m.id DESC LIMIT ${PAGE}`, [parseInt(req.query.before) || 9e15]);
+  const before = parseInt(req.query.before) || 9e15;
+  const r = await q(`${msgSelect} WHERE m.id<$1 ORDER BY m.id DESC LIMIT ${PAGE}`, [before]);
   res.json({ messages: r.rows.reverse().map(msgOut) });
 }));
+
 app.post('/api/messages', auth, writeGuard, sendLimiter, wrap(async (req, res) => {
-  const text = cleanText(req.body?.text); if (!text) return res.status(400).json({ error: 'Bad request' });
+  const text = cleanText(req.body?.text);
+  if (!text || !(await verifyCaptcha(req.body?.captcha, clientIp(req)))) return res.status(400).json({ error: 'Bad request' });
   const ins = await q('INSERT INTO messages (user_id,text) VALUES ($1,$2) RETURNING id', [req.user.id, text]);
   const out = msgOut((await q(`${msgSelect} WHERE m.id=$1`, [ins.rows[0].id])).rows[0]);
-  io.to('global').emit('message:new', out); res.json({ message: out });
+  io.to('global').emit('message:new', out);
+  res.json({ message: out });
 }));
 
-const dmOut = (r) => ({ id: r.id, senderId: r.sender_id, recipientId: r.recipient_id, text: r.text, createdAt: r.created_at });
+app.patch('/api/messages/:id', auth, writeGuard, wrap(async (req, res) => {
+  const text = cleanText(req.body?.text);
+  const m = (await q('SELECT * FROM messages WHERE id=$1', [req.params.id])).rows[0];
+  if (!text || !m || m.user_id !== req.user.id || Date.now() - new Date(m.created_at) > EDIT_WINDOW_MS) return res.status(400).json({ error: 'Bad request' });
+  await q('UPDATE messages SET text=$1, edited_at=NOW() WHERE id=$2', [text, m.id]);
+  const out = msgOut((await q(`${msgSelect} WHERE m.id=$1`, [m.id])).rows[0]);
+  io.to('global').emit('message:update', out);
+  res.json({ message: out });
+}));
+
+app.delete('/api/messages/:id', auth, wrap(async (req, res) => {
+  const m = (await q('SELECT * FROM messages WHERE id=$1', [req.params.id])).rows[0];
+  if (!m || m.user_id !== req.user.id || Date.now() - new Date(m.created_at) > EDIT_WINDOW_MS) return res.status(400).json({ error: 'Bad request' });
+  await q('DELETE FROM messages WHERE id=$1', [m.id]);
+  io.to('global').emit('message:delete', { id: m.id });
+  res.json({ ok: true });
+}));
+
+// --- ЛИЧНЫЕ СООБЩЕНИЯ (DM) ---
+const dmOut = (r) => ({ id: r.id, senderId: r.sender_id, recipientId: r.recipient_id, text: r.text, createdAt: r.created_at, editedAt: r.edited_at, editedByAdmin: r.edited_by_admin });
+const emitDm = (ev, row, payload) => { io.to(`user:${row.sender_id}`).to(`user:${row.recipient_id}`).emit(ev, payload); };
+
 app.get('/api/dm/conversations', auth, wrap(async (req, res) => {
   const r = await q(`SELECT DISTINCT ON (peer) peer, text, created_at, id FROM (SELECT CASE WHEN sender_id=$1 THEN recipient_id ELSE sender_id END AS peer, text, created_at, id FROM dm_messages WHERE sender_id=$1 OR recipient_id=$1) t ORDER BY peer, id DESC`, [req.user.id]);
   const ids = r.rows.map((x) => x.peer);
   const us = ids.length ? (await q('SELECT id,username,display_name,avatar_url,role,checkmark FROM users WHERE id=ANY($1)', [ids])).rows : [];
   const map = Object.fromEntries(us.map((u) => [u.id, u]));
-  res.json({ conversations: r.rows.filter((x) => map[x.peer]).map((x) => ({ user: publicUser(map[x.peer]), lastText: x.text, lastAt: x.created_at, lastId: Number(x.id) })).sort((a, b) => b.lastId - a.lastId) });
+  const convs = r.rows.filter((x) => map[x.peer]).map((x) => ({ user: publicUser(map[x.peer]), lastText: x.text, lastAt: x.created_at, lastId: Number(x.id) })).sort((a, b) => b.lastId - a.lastId);
+  res.json({ conversations: convs });
 }));
+
 app.get('/api/dm/:userId', auth, wrap(async (req, res) => {
-  const peer = parseInt(req.params.userId);
+  const peer = parseInt(req.params.userId); const before = parseInt(req.query.before) || 9e15;
   const pu = (await q('SELECT id,username,display_name,avatar_url,role,checkmark FROM users WHERE id=$1', [peer])).rows[0];
   if (!pu) return res.status(404).json({ error: 'Not found' });
-  const r = await q(`SELECT * FROM dm_messages WHERE ((sender_id=$1 AND recipient_id=$2) OR (sender_id=$2 AND recipient_id=$1)) ORDER BY id DESC LIMIT 50`, [req.user.id, peer]);
-  res.json({ peer: publicUser(pu), messages: r.rows.reverse().map(dmOut) });
+  const r = await q(`SELECT * FROM dm_messages WHERE id<$3 AND ((sender_id=$1 AND recipient_id=$2) OR (sender_id=$2 AND recipient_id=$1)) ORDER BY id DESC LIMIT ${PAGE}`, [req.user.id, peer, before]);
+  res.json({ peer: publicUser(pu), blocked: false, messages: r.rows.reverse().map(dmOut) });
 }));
-app.post('/api/dm/:userId', auth, writeGuard, wrap(async (req, res) => {
+
+app.post('/api/dm/:userId', auth, writeGuard, sendLimiter, wrap(async (req, res) => {
   const peer = parseInt(req.params.userId); const text = cleanText(req.body?.text);
+  if (!text || !peer || peer === req.user.id) return res.status(400).json({ error: 'Bad request' });
   const r = await q('INSERT INTO dm_messages (sender_id,recipient_id,text) VALUES ($1,$2,$3) RETURNING *', [req.user.id, peer, text]);
-  io.to(`user:${peer}`).to(`user:${req.user.id}`).emit('dm:new', dmOut(r.rows[0]));
+  emitDm('dm:new', r.rows[0], dmOut(r.rows[0]));
   res.json({ message: dmOut(r.rows[0]) });
 }));
 
 // --- КАНАЛЫ ---
 app.get('/api/channels', auth, wrap(async (req, res) => {
-  // Если это CEBA, показываем все. Если обычный юзер - только те, где он участник.
   const query = isOwner(req.user) ? 'SELECT * FROM channels ORDER BY id DESC' : 
     `SELECT c.* FROM channels c JOIN channel_members m ON c.id = m.channel_id WHERE m.user_id = $1 ORDER BY c.id DESC`;
   const r = await q(query, isOwner(req.user) ? [] : [req.user.id]);
@@ -167,7 +230,7 @@ app.get('/api/channels', auth, wrap(async (req, res) => {
 app.post('/api/channels', auth, wrap(async (req, res) => {
   if (req.user.checkmark !== 'green' && req.user.username !== 'CEBA') return res.status(403).json({ error: 'Нужна зеленая галка' });
   const { name, description } = req.body;
-  const invite_code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-значный код
+  const invite_code = Math.floor(100000 + Math.random() * 900000).toString();
   const r = await q('INSERT INTO channels (owner_id, name, description, invite_code) VALUES ($1, $2, $3, $4) RETURNING *', [req.user.id, name, description, invite_code]);
   await q('INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)', [r.rows[0].id, req.user.id]);
   res.json({ channel: r.rows[0] });
@@ -181,32 +244,7 @@ app.post('/api/channels/join', auth, wrap(async (req, res) => {
   res.json({ channel: ch });
 }));
 
-app.post('/api/channels/:id/members', auth, wrap(async (req, res) => {
-  const ch = (await q('SELECT * FROM channels WHERE id=$1', [req.params.id])).rows[0];
-  if (!ch) return res.status(404).json({ error: 'Not found' });
-  if (ch.owner_id !== req.user.id && req.user.username !== 'CEBA') return res.status(403).json({ error: 'Только создатель может добавлять' });
-  
-  const target = (await q('SELECT id FROM users WHERE LOWER(username)=LOWER($1)', [req.body.username])).rows[0];
-  if (!target) return res.status(404).json({ error: 'Юзер не найден' });
-  await q('INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [ch.id, target.id]);
-  res.json({ ok: true });
-}));
-
-app.get('/api/channels/:id/messages', auth, wrap(async (req, res) => {
-  const r = await q(`SELECT m.*, u.username, u.display_name, u.avatar_url, u.role, u.checkmark FROM channel_messages m JOIN users u ON u.id = m.user_id WHERE m.channel_id = $1 ORDER BY m.id ASC LIMIT 100`, [req.params.id]);
-  res.json({ messages: r.rows.map(row => ({ id: row.id, text: row.text, createdAt: row.created_at, user: { id: row.user_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark } })) });
-}));
-
-app.post('/api/channels/:id/messages', auth, writeGuard, wrap(async (req, res) => {
-  const text = cleanText(req.body?.text); if (!text) return res.status(400).json({ error: 'Empty' });
-  const ins = await q('INSERT INTO channel_messages (channel_id, user_id, text) VALUES ($1, $2, $3) RETURNING id', [req.params.id, req.user.id, text]);
-  const row = (await q(`SELECT m.*, u.username, u.display_name, u.avatar_url, u.role, u.checkmark FROM channel_messages m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [ins.rows[0].id])).rows[0];
-  const out = { id: row.id, text: row.text, createdAt: row.created_at, user: { id: row.user_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark } };
-  io.to(`channel:${req.params.id}`).emit('channel:new', { channelId: req.params.id, message: out });
-  res.json({ message: out });
-}));
-
-// Редактирование СВОЕГО канала (или админом)
+// Редактирование канала (создатель или CEBA)
 app.patch('/api/channels/:id', auth, wrap(async (req, res) => {
   const chId = parseInt(req.params.id);
   const ch = (await q('SELECT * FROM channels WHERE id=$1', [chId])).rows[0];
@@ -223,10 +261,33 @@ app.patch('/api/channels/:id', auth, wrap(async (req, res) => {
   res.json({ channel: r.rows[0] });
 }));
 
-// Выход из канала
+// Удаление канала (создатель или CEBA)
+app.delete('/api/channels/:id', auth, wrap(async (req, res) => {
+  const ch = (await q('SELECT * FROM channels WHERE id=$1', [req.params.id])).rows[0];
+  if (!ch) return res.status(404).json({ error: 'Not found' });
+  if (ch.owner_id !== req.user.id && req.user.username !== 'CEBA') return res.status(403).json({ error: 'Нет прав' });
+  await q('DELETE FROM channels WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
+// Выход из канала (для обычных участников)
 app.delete('/api/channels/:id/leave', auth, wrap(async (req, res) => {
   await q('DELETE FROM channel_members WHERE channel_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
   res.json({ ok: true });
+}));
+
+app.get('/api/channels/:id/messages', auth, wrap(async (req, res) => {
+  const r = await q(`SELECT m.*, u.username, u.display_name, u.avatar_url, u.role, u.checkmark FROM channel_messages m JOIN users u ON u.id = m.user_id WHERE m.channel_id = $1 ORDER BY m.id ASC LIMIT 100`, [req.params.id]);
+  res.json({ messages: r.rows.map(row => ({ id: row.id, text: row.text, createdAt: row.created_at, user: { id: row.user_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark } })) });
+}));
+
+app.post('/api/channels/:id/messages', auth, writeGuard, wrap(async (req, res) => {
+  const text = cleanText(req.body?.text); if (!text) return res.status(400).json({ error: 'Empty' });
+  const ins = await q('INSERT INTO channel_messages (channel_id, user_id, text) VALUES ($1, $2, $3) RETURNING id', [req.params.id, req.user.id, text]);
+  const row = (await q(`SELECT m.*, u.username, u.display_name, u.avatar_url, u.role, u.checkmark FROM channel_messages m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [ins.rows[0].id])).rows[0];
+  const out = { id: row.id, text: row.text, createdAt: row.created_at, user: { id: row.user_id, username: row.username, displayName: row.display_name, avatarUrl: row.avatar_url, role: row.role, checkmark: row.checkmark } };
+  io.to(`channel:${req.params.id}`).emit('channel:new', { channelId: req.params.id, message: out });
+  res.json({ message: out });
 }));
 
 // --- ИСТОРИИ ---
