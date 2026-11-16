@@ -1,7 +1,6 @@
 (function () {
   const { el, api, avatar, fmt, toast } = NL;
   const root = document.getElementById('root');
-  // Добавил searchQuery в состояние
   const S = { me: null, isAdmin: false, cfg: {}, view: { type: 'global' }, convs: [], channels: [], socket: null, msgs: [], peer: null, currentChannel: null, searchQuery: '' };
 
   const getSVG = (name, size = 20) => {
@@ -85,7 +84,6 @@
     
     const fabBtn = el('div', { class: 'fab-btn', onclick: openAddMenu }, getSVG('plus', 28));
     
-    // ДОБАВЛЕНА ЛОГИКА ПОИСКА
     const searchInput = el('input', { 
       type: 'search', 
       placeholder: 'Поиск...', 
@@ -126,12 +124,10 @@
   function toggleMenu() { document.querySelector('.side-drawer').classList.toggle('open'); document.querySelector('.side-overlay').classList.toggle('open'); }
 
   function openAddMenu() {
-    // ПРОВЕРКА НА ГАЛОЧКУ
     const canCreateChannel = S.me.checkmark === 'green' || S.me.username === 'CEBA';
 
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Действия'),
-      // Если есть права - показываем кнопку, иначе null
       canCreateChannel ? el('button', { class: 'btn', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); createChannel(); } }, 'Создать канал') : null,
       el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); joinChannel(); } }, 'Войти по коду канала'),
       el('button', { class: 'btn ghost', style: 'width:100%; margin-bottom:10px', onclick: () => { m.remove(); findUser(); } }, 'Найти человека (Начать чат)'),
@@ -140,16 +136,27 @@
     document.body.append(m);
   }
 
+  // ИСПРАВЛЕНА ФУНКЦИЯ ПОИСКА ЧЕЛОВЕКА
   function findUser() {
-    const un = el('input', { placeholder: 'Введите @username' });
+    const un = el('input', { placeholder: 'Введите username' });
     const m = el('div', { class: 'modal', onclick: (e) => e.target === m && m.remove() }, el('div', { class: 'card' },
       el('h3', { class: 'neon-text' }, 'Поиск человека'), un,
       el('button', { class: 'btn', style: 'margin-top:15px; width:100%', onclick: async () => {
         try { 
-          const res = await api('GET', '/api/users?q=' + encodeURIComponent(un.value.trim())); 
-          if (!res.users.length) return toast('Пользователь не найден');
-          m.remove(); openDm(res.users[0].id);
-        } catch(e) { toast(e.message); }
+          // Очищаем ввод от символа @, если он там есть
+          const query = un.value.trim().replace(/^@/, '');
+          if (!query) return toast('Введите имя пользователя', 'error');
+          
+          const res = await api('GET', '/api/users?q=' + encodeURIComponent(query)); 
+          if (!res.users || res.users.length === 0) {
+             return toast('Пользователь не найден', 'error');
+          }
+          
+          m.remove(); 
+          openDm(res.users[0].id);
+        } catch(e) { 
+          toast(e.message, 'error'); 
+        }
       } }, 'Найти и написать')));
     document.body.append(m);
   }
@@ -179,16 +186,13 @@
     renderSide(); 
   }
 
-  // ОБНОВЛЕННЫЙ РЕНДЕР С УЧЕТОМ ПОИСКА
   function renderSide() {
     const q = S.searchQuery;
     
-    // Фильтруем каналы
     const filteredChannels = S.channels.filter(c => 
       !q || c.name.toLowerCase().includes(q) || (c.description && c.description.toLowerCase().includes(q))
     );
 
-    // Фильтруем личные чаты
     const filteredConvs = S.convs.filter(c => 
       !q || c.user.displayName.toLowerCase().includes(q) || c.user.username.toLowerCase().includes(q)
     );
@@ -201,7 +205,6 @@
         av, el('div', { class: 'meta' }, el('b', {}, c.name, getCheckSVG(c.checkmark)), el('span', {}, c.description || 'Канал')));
     });
 
-    // Если ничего не найдено - показываем заглушку (по желанию)
     if (q && channelItems.length === 0 && filteredConvs.length === 0) {
        $list.replaceChildren(g, el('div', { style: 'padding: 20px; color: #888; text-align: center;' }, 'Ничего не найдено'));
        return;
